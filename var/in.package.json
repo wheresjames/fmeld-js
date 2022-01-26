@@ -1,0 +1,31 @@
+{
+  "name": "%NAME%",
+  "version": "%VERSION%",
+  "description": "%DESCRIPTION%",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "test.js"
+  },
+  "bin": {
+    "%NAME%": "bin/%NAME%.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "%REPO%"
+  },
+  "dependencies": {
+      "sparen": "^0.2.2",
+      "ssh2": "^1.5.0"
+  },
+  "keywords": [
+    "npm",
+    "install",
+    "package"
+  ],
+  "author": "%AUTHOR%",
+  "license": "%LICENSE%",
+  "bugs": {
+    "url": "%URL%/issues"
+  },
+  "homepage": "%URL%"
+}

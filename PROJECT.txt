@@ -1,0 +1,10 @@
+name            fmeld
+version         0.1.1
+description     Sync files between ftp, sftp, GDrive, AWS, GCS
+company         wheresjames
+author          Robert Umbehant
+email           fmeld@wheresjames.com
+url             https://github.com/wheresjames/fmeld-js
+repo            git+ssh://git@github.com/wheresjames/fmeld-js.git
+bugs            https://github.com/wheresjames/fmeld-js/issues
+license         MIT
