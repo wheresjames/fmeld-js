@@ -1,5 +1,5 @@
 name            fmeld
-version         0.1.1
+version         0.1.2
 description     Sync files between ftp, sftp, GDrive, AWS, GCS
 company         wheresjames
 author          Robert Umbehant

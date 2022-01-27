@@ -51,7 +51,7 @@ function nextCommand(_p)
 
                         nextCommand(_p);
                     })
-                    .catch((e)=>{ Log(e); _p.src.close(); });
+                    .catch((e)=>{ Log(e); nextCommand(_p); });
                 break;
 
             case 'lsl':
@@ -70,31 +70,34 @@ function nextCommand(_p)
 
                         nextCommand(_p);
                     })
-                    .catch((e)=>{ Log(e); _p.src.close(); });
+                    .catch((e)=>{ Log(e); nextCommand(_p); });
                 break;
 
             case 'cp':
                 if (!isReady(_p, cmd, true, true))
                     return;
 
-                copyDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(), {recursive: true},
-                                                (p, from, to, t) =>
-                                                {   if ('file' == t)
-                                                    {   let msg = `\r[${String(p.toFixed(2)).padStart(6,' ')}%] ${from} -> ${to}` + ((100==p) ? '\r\n' : '');
-                                                        process.stdout.write(msg.slice(0, 100).padEnd(100,' '));
-                                                    }
-                                                    else if ('dir' == t)
-                                                    {
-                                                        process.stdout.write(`\r========> ${from} => ${to}\r\n`);
-                                                    }
-                                                })
+                // Copy the directory
+                fmeld.copyDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(), {recursive: true}, fmeld.stdoutProgress)
                     .then((r) => { nextCommand(_p); })
-                    .catch((e)=>{ Log(e); throw `Failed ${e}`; });
+                    .catch((e)=>{ Log(e); nextCommand(_p); });
 
                 break;
 
-                default:
-                    throw `Unknown command ${cmd}`;
+            case 'sync':
+                if (!isReady(_p, cmd, true, true))
+                    return;
+
+                // Copy the directory
+                fmeld.syncDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(),
+                              {recursive: true, compare: 'size'}, fmeld.stdoutProgress)
+                    .then((r) => { nextCommand(_p); })
+                    .catch((e)=>{ Log(e); nextCommand(_p); });
+
+                break;
+
+            default:
+                throw `Unknown command ${cmd}`;
         }
     }
 }
