@@ -21,8 +21,8 @@ function test_1()
     let tmp = path.join(os.tmpdir(), 'fmeld-test');
     Log(`Temp path: ${tmp}`);
 
-    let fake = fmeld.getConnection('fake:///5.20/3.10', {verbose: true, throttle: 0});
-    let tmpd = fmeld.getConnection(`file://${tmp}`, {verbose: true});
+    let fake = fmeld.getConnection('fake:///5.20/3.10', null, {verbose: true, throttle: 0});
+    let tmpd = fmeld.getConnection(`file://${tmp}`, null, {verbose: true});
 
     // Copy files from fake tree to temp directory
     (async() => {

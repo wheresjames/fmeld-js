@@ -78,7 +78,11 @@ function nextCommand(_p)
                     return;
 
                 // Copy the directory
-                fmeld.copyDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(), {recursive: true}, fmeld.stdoutProgress)
+                fmeld.copyDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(),
+                                {   recursive       : _p.recursive ? true : false,
+                                    filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
+                                    filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : ''
+                                }, fmeld.stdoutProgress)
                     .then((r) => { nextCommand(_p); })
                     .catch((e)=>{ Log(e); nextCommand(_p); });
 
@@ -90,7 +94,14 @@ function nextCommand(_p)
 
                 // Copy the directory
                 fmeld.syncDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(),
-                              {recursive: true, compare: 'size'}, fmeld.stdoutProgress)
+                                {   recursive       : _p.recursive ? true : false,
+                                    less            : _p.less ? true : false,
+                                    compare         : 'size,date',
+                                    upload          : _p.upload ? true : false,
+                                    download        : _p.download ? true : false,
+                                    filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
+                                    filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : ''
+                                }, fmeld.stdoutProgress)
                     .then((r) => { nextCommand(_p); })
                     .catch((e)=>{ Log(e); nextCommand(_p); });
 
@@ -119,10 +130,19 @@ function main()
 {
     // Parse command line
     let _p = fmeld.__config__.parseParams('fmeld [options] [commands ...]', process.argv,
-        [   ['s', 'source=',    'Source URL'],
-            ['d', 'dest=',      'Destination URL'],
-            ['v', 'version',    'Show version'],
-            ['V', 'verbose',    'Verbose logging']
+        [   ['s', 'source=',        'Source URL'],
+            ['S', 'source-cred=',   'Source Credentials.  Can be file / dir / environment variable'],
+            ['d', 'dest=',          'Destination URL'],
+            ['D', 'dest-cred=',     'Destination Credentials.  Can be file / dir / environment variable'],
+            ['c', 'cred-root=',     'Credentials root.  Can be a directory or environment variable'],
+            ['f', 'filter-files=',  'Filter files based on regex expression'],
+            ['F', 'filter-dirs=',   'Filter directories based on regex expression'],
+            ['r', 'recursive',      'Recurse into sub directories'],
+            ['D', 'download',       'Download changed or missing files from destination to source'],
+            ['U', 'upload',         'Upload changed or missing files from source to destination'],
+            ['l', 'less',           'Show less console output'],
+            ['v', 'version',        'Show version'],
+            ['V', 'verbose',        'Verbose logging']
         ]);
 
     // Verbose mode?
@@ -148,17 +168,16 @@ function main()
         throw(`Source location not specified`);
 
     // Connect source
-    _p.src = fmeld.getConnection(_p.source, _p);
+    _p.src = fmeld.getConnection(_p.source, _p['source-cred'], _p);
     _p.src.connect().then((r) => { nextCommand(_p); })
                     .catch((e)=> { Log(e); quit(_p); });
 
     // Connect the destination if any
     if (_p.dest)
-    {   _p.dst = fmeld.getConnection(_p.dest, _p);
+    {   _p.dst = fmeld.getConnection(_p.dest, _p['dest-cred'], _p);
         _p.dst.connect().then((r) => { nextCommand(_p); })
                         .catch((e)=> { Log(e); quit(_p); });
     }
-
 }
 
 // Exit handling
