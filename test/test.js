@@ -34,7 +34,6 @@ function test_1()
         throw failed;
 
     Log('EOT');
-
 }
 
 function isCmd(lst, cmd)

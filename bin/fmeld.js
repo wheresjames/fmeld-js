@@ -6,6 +6,13 @@ const path = require('path');
 const fmeld = require('fmeld');
 var Log = console.log;
 
+/** Returns true if resources are available to execute the specified command
+
+    @params [in] _p         - Propertybag
+    @params [in] cmd        - Command that is to be executed
+    @params [in] needSrc    - true if the command requires a source object
+    @params [in] needDst    - true if the command requires a destination object
+*/
 function isReady(_p, cmd, needSrc, needDst)
 {
     if (needSrc)
@@ -29,6 +36,9 @@ function isReady(_p, cmd, needSrc, needDst)
     return true;
 }
 
+/** Executes the next command
+    @param [in] _p  - Property bag
+*/
 function nextCommand(_p)
 {
     if ( 1 > _p.cmds.length)
@@ -113,6 +123,10 @@ function nextCommand(_p)
     }
 }
 
+/** Releases application resources
+
+    @param [in] _p  - Property bag
+*/
 function quit(_p)
 {
     if (_p.src)
@@ -126,6 +140,7 @@ function quit(_p)
     }
 }
 
+/// Main application function
 function main()
 {
     // Parse command line

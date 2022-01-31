@@ -1,6 +1,6 @@
 name            fmeld
-version         0.1.3
-description     Sync files between ftp, sftp, GDrive, AWS, GCS
+version         0.1.4
+description     Sync files between local drive, ftp, sftp
 company         wheresjames
 author          Robert Umbehant
 email           fmeld@wheresjames.com

@@ -1,12 +1,31 @@
 
 # fmeld
 
-Sync files between ftp, sftp, GDrive, AWS, GCS
+Sync files between local drive, ftp, sftp
+
+
+``` bash
+
+    # List files on ftp server
+    fmeld -s ftp://user:pass@127.0.0.1:21/test/location ls
+
+    # Use password file instead of command line
+    fmeld -S /path/to/password/file -s ftp://user@127.0.0.1/test/location ls
+
+    # Copy files from ftp server to local directory
+    fmeld -s ftp://user:pass@127.0.0.1:21/test/location -d file:///tmp/some/path cp
+
+    # Sync files from ftp server to sftp server
+    fmeld -s ftp://user:pass@127.0.0.1:21/test/location -d sftp://user@127.0.0.1:22/test/location sync -Dr
+
+```
+
 
 ---------------------------------------------------------------------
 ## Table of contents
 
 * [Install](#install)
+* [Command Line](#command-line)
 * [Examples](#examples)
 * [References](#references)
 
@@ -20,12 +39,86 @@ Sync files between ftp, sftp, GDrive, AWS, GCS
 
 &nbsp;
 
+---------------------------------------------------------------------
+## Command Line
+
+```
+fmeld [options] [commands ...]
+
+ --- OPTIONS ---
+
+  -s  --source         [arg]   -  Source URL
+  -S  --source-cred    [arg]   -  Source Credentials.  Can be file / dir / environment variable
+  -d  --dest           [arg]   -  Destination URL
+  -D  --download               -  Download changed or missing files from destination to source
+  -D  --dest-cred      [arg]   -  Destination Credentials.  Can be file / dir / environment variable
+  -c  --cred-root      [arg]   -  Credentials root.  Can be a directory or environment variable
+  -f  --filter-files   [arg]   -  Filter files based on regex expression
+  -F  --filter-dirs    [arg]   -  Filter directories based on regex expression
+  -r  --recursive              -  Recurse into sub directories
+  -U  --upload                 -  Upload changed or missing files from source to destination
+  -l  --less                   -  Show less console output
+  -v  --version                -  Show version
+  -V  --verbose                -  Verbose logging
+  -h  --help                   -  Display help
+
+```
+
+&nbsp;
+
 
 ---------------------------------------------------------------------
 ## Examples
 
+
+Using from the command line
+
+``` bash
+
+    # List files on ftp server
+    fmeld -s ftp://user:pass@127.0.0.1:21/test/location ls
+
+    # Use password file instead of command line
+    fmeld -S /path/to/password/file -s ftp://user@127.0.0.1/test/location ls
+
+    # Copy files from ftp server to local directory
+    fmeld -s ftp://user:pass@127.0.0.1:21/test/location -d file:///tmp/some/path cp
+
+    # Sync files from sftp server to local directory
+    fmeld -s sftp://user:pass@127.0.0.1:21/test/location -d file:///tmp/some/path sync -Dr
+
+
+```
+
+
+fmeld can also be used as a node.js library.
+
 ``` javascript
 
+    const fmeld = require('fmeld');
+    const Log = console.log;
+
+    // Connect to ftp server
+    let ftp = fmeld.getConnection('ftp://192.168.1.250/some/directory', null, {verbose: true});
+    ftp.connect().then((r) => {
+
+            // Show directory
+            (async() => {
+                    await ftp.ls('/')
+                                .then((r)=>{ Log(r); })
+                                .catch((e)=>{ Log(e); });
+                });
+
+            // Sync files to local temp directory
+            let tmpd = fmeld.getConnection(`file://${path.join(os.tmpdir(), 'test')}`, null, {verbose: true});
+            (async() => {
+                    await fmeld.syncDir(ftp, tmpd, ftp.makePath(), tmpd.makePath(), {recursive: true}, fmeld.stdoutProgress)
+                                .then((r) => { Log(`Done: ${r}`); })
+                                .catch((e)=>{ Log(e); });
+                })();
+
+        })
+        .catch((e)=>{ Log(e); });
 
 ```
 
