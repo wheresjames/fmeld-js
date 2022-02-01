@@ -1,4 +1,12 @@
 
+# v0.1.5 - 2022-01-31
+
+[+] Added Google cloud storage support
+[+] Trim long paths
+[+] Human readable sizes
+[+] Flatten path option
+
+
 # v0.1.4 - 2022-01-30
 
 [+] Added ftp support

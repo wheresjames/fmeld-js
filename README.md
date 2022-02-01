@@ -1,7 +1,7 @@
 
 # fmeld
 
-Sync files between local drive, ftp, sftp
+Sync files between local drive, ftp, sftp, google cloud storage
 
 
 ``` bash
@@ -16,9 +16,13 @@ Sync files between local drive, ftp, sftp
     fmeld -s ftp://user:pass@127.0.0.1:21/test/location -d file:///tmp/some/path cp
 
     # Sync files from ftp server to sftp server
-    fmeld -s ftp://user:pass@127.0.0.1:21/test/location -d sftp://user@127.0.0.1:22/test/location sync -Dr
+    fmeld -s ftp://user:pass@127.0.0.1:21/test/location -d sftp://user@127.0.0.1:22/test/location sync -Ur
+
+    # Sync files from google cloud storage to sftp server
+    fmeld -S ./google-credentials.json -s gs://bucket-name/test/location -d sftp://user@127.0.0.1:22/test/location sync -Ur
 
 ```
+&nbsp;
 
 
 ---------------------------------------------------------------------
@@ -39,6 +43,7 @@ Sync files between local drive, ftp, sftp
 
 &nbsp;
 
+
 ---------------------------------------------------------------------
 ## Command Line
 
@@ -50,13 +55,14 @@ fmeld [options] [commands ...]
   -s  --source         [arg]   -  Source URL
   -S  --source-cred    [arg]   -  Source Credentials.  Can be file / dir / environment variable
   -d  --dest           [arg]   -  Destination URL
-  -D  --download               -  Download changed or missing files from destination to source
-  -D  --dest-cred      [arg]   -  Destination Credentials.  Can be file / dir / environment variable
+  -E  --dest-cred      [arg]   -  Destination Credentials.  Can be file / dir / environment variable
   -c  --cred-root      [arg]   -  Credentials root.  Can be a directory or environment variable
   -f  --filter-files   [arg]   -  Filter files based on regex expression
   -F  --filter-dirs    [arg]   -  Filter directories based on regex expression
   -r  --recursive              -  Recurse into sub directories
+  -D  --download               -  Download changed or missing files from destination to source
   -U  --upload                 -  Upload changed or missing files from source to destination
+  -G  --flatten                -  Flatten the directory structure
   -l  --less                   -  Show less console output
   -v  --version                -  Show version
   -V  --verbose                -  Verbose logging
@@ -87,6 +93,8 @@ Using from the command line
     # Sync files from sftp server to local directory
     fmeld -s sftp://user:pass@127.0.0.1:21/test/location -d file:///tmp/some/path sync -Dr
 
+    # Sync files from google cloud storage to sftp server
+    fmeld -S ./google-credentials.json -s gs://bucket-name/test/location -d sftp://user@127.0.0.1:22/test/location sync -Ur
 
 ```
 

@@ -25,7 +25,7 @@ function isReady(_p, cmd, needSrc, needDst)
         }
     }
     if (needDst)
-    {   if(!_p.src)
+    {   if(!_p.dst)
             throw `Command requires destination : ${cmd}`;
         if (!_p.dst.isConnected())
         {   _p.cmds.unshift(cmd);
@@ -39,12 +39,12 @@ function isReady(_p, cmd, needSrc, needDst)
 /** Executes the next command
     @param [in] _p  - Property bag
 */
-function nextCommand(_p)
+function nextCommand(_p, init=false)
 {
-    if ( 1 > _p.cmds.length)
+    if (!init && 1 > _p.cmds.length)
         quit(_p);
 
-    else
+    else if (0 < _p.cmds.length)
     {
         let cmd = _p.cmds.shift();
         switch(cmd)
@@ -76,7 +76,7 @@ function nextCommand(_p)
                                 Log(`[${v.full}]`);
                         for (let v of r)
                             if (v.isFile)
-                                Log(`${v.full} (${v.size})`);
+                                Log(`${v.full} (${fmeld.toHuman(v.size)})`);
 
                         nextCommand(_p);
                     })
@@ -90,6 +90,7 @@ function nextCommand(_p)
                 // Copy the directory
                 fmeld.copyDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(),
                                 {   recursive       : _p.recursive ? true : false,
+                                    flatten         : _p.flatten ? true : false,
                                     filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
                                     filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : ''
                                 }, fmeld.stdoutProgress)
@@ -109,6 +110,7 @@ function nextCommand(_p)
                                     compare         : 'size,date',
                                     upload          : _p.upload ? true : false,
                                     download        : _p.download ? true : false,
+                                    flatten         : _p.flatten ? true : false,
                                     filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
                                     filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : ''
                                 }, fmeld.stdoutProgress)
@@ -148,13 +150,14 @@ function main()
         [   ['s', 'source=',        'Source URL'],
             ['S', 'source-cred=',   'Source Credentials.  Can be file / dir / environment variable'],
             ['d', 'dest=',          'Destination URL'],
-            ['D', 'dest-cred=',     'Destination Credentials.  Can be file / dir / environment variable'],
+            ['E', 'dest-cred=',     'Destination Credentials.  Can be file / dir / environment variable'],
             ['c', 'cred-root=',     'Credentials root.  Can be a directory or environment variable'],
             ['f', 'filter-files=',  'Filter files based on regex expression'],
             ['F', 'filter-dirs=',   'Filter directories based on regex expression'],
             ['r', 'recursive',      'Recurse into sub directories'],
             ['D', 'download',       'Download changed or missing files from destination to source'],
             ['U', 'upload',         'Upload changed or missing files from source to destination'],
+            ['G', 'flatten',        'Flatten the directory structure'],
             ['l', 'less',           'Show less console output'],
             ['v', 'version',        'Show version'],
             ['V', 'verbose',        'Verbose logging']
@@ -184,13 +187,13 @@ function main()
 
     // Connect source
     _p.src = fmeld.getConnection(_p.source, _p['source-cred'], _p);
-    _p.src.connect().then((r) => { nextCommand(_p); })
+    _p.src.connect().then((r) => { nextCommand(_p, true); })
                     .catch((e)=> { Log(e); quit(_p); });
 
     // Connect the destination if any
     if (_p.dest)
     {   _p.dst = fmeld.getConnection(_p.dest, _p['dest-cred'], _p);
-        _p.dst.connect().then((r) => { nextCommand(_p); })
+        _p.dst.connect().then((r) => { nextCommand(_p, true); })
                         .catch((e)=> { Log(e); quit(_p); });
     }
 }
