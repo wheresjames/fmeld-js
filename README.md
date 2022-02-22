@@ -21,6 +21,9 @@ Sync files between local drive, ftp, sftp, google cloud storage
     # Sync files from google cloud storage to sftp server
     fmeld -S ./google-credentials.json -s gs://bucket-name/test/location -d sftp://user@127.0.0.1:22/test/location sync -Ur
 
+    # Sync files from google drive to sftp server
+    fmeld -S ./google-credentials.json -s gdrive://path/to/files -d sftp://user@127.0.0.1:22/upload/location sync -Ur
+
 ```
 &nbsp;
 
@@ -57,13 +60,19 @@ fmeld [options] [commands ...]
   -d  --dest           [arg]   -  Destination URL
   -E  --dest-cred      [arg]   -  Destination Credentials.  Can be file / dir / environment variable
   -c  --cred-root      [arg]   -  Credentials root.  Can be a directory or environment variable
+  -u  --uncached       [arg]   -  Do not use any cached credentials.
   -f  --filter-files   [arg]   -  Filter files based on regex expression
   -F  --filter-dirs    [arg]   -  Filter directories based on regex expression
   -r  --recursive              -  Recurse into sub directories
-  -D  --download               -  Download changed or missing files from destination to source
+  -D  --download               -  Download missing files from destination to source
   -U  --upload                 -  Upload changed or missing files from source to destination
   -G  --flatten                -  Flatten the directory structure
   -l  --less                   -  Show less console output
+  -z  --raw-size               -  Show raw file size
+  -x  --retry          [arg]   -  Number of times to retry
+  -k  --skip                   -  Skip files that fail
+  -t  --timestamp              -  Always show timestamp
+  -i  --detailed               -  Show detailed progress info
   -v  --version                -  Show version
   -V  --verbose                -  Verbose logging
   -h  --help                   -  Display help
@@ -95,6 +104,9 @@ Using from the command line
 
     # Sync files from google cloud storage to sftp server
     fmeld -S ./google-credentials.json -s gs://bucket-name/test/location -d sftp://user@127.0.0.1:22/test/location sync -Ur
+
+    # Sync files from google drive to sftp server
+    fmeld -S ./google-credentials.json -s gdrive://path/to/files -d sftp://user@127.0.0.1:22/upload/location sync -Ur
 
 ```
 

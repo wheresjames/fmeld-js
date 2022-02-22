@@ -1,4 +1,11 @@
 
+# v0.1.6 - 2022-02-21
+
+[+] Support for downloading files from google drive
+[+] Retry option
+[+] Detailed transfer information
+[+] Timestamp options
+
 # v0.1.5 - 2022-01-31
 
 [+] Added Google cloud storage support

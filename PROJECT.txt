@@ -1,5 +1,5 @@
 name            fmeld
-version         0.1.5
+version         0.1.6
 description     Sync files between local drive, ftp, sftp
 company         wheresjames
 author          Robert Umbehant
