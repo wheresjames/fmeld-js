@@ -1,7 +1,7 @@
 
 # fmeld
 
-Sync files between local drive, ftp, sftp, google cloud storage
+Sync files between local drive, ftp, sftp, google cloud storage, google drive
 
 
 ``` bash
