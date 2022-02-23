@@ -24,25 +24,22 @@ var tsLog = (...args) =>
 */
 function isReady(_p, cmd, needSrc, needDst)
 {
-    if (needSrc)
-    {   if(!_p.src)
-            throw `Command requires source : ${cmd}`;
-        if (!_p.src.isConnected())
-        {   _p.cmds.unshift(cmd);
-            Log(`Waiting for source connection : ${_p.src.args.name}`);
-            return false;
+    return new Promise((resolve, reject) =>
+    {
+        if (needSrc)
+        {   if(!_p.src)
+                return reject(`Command requires source : ${cmd}`);
+            if (!_p.src.isConnected())
+                return reject(`Waiting for source connection : ${_p.src.args.name}`);
         }
-    }
-    if (needDst)
-    {   if(!_p.dst)
-            throw `Command requires destination : ${cmd}`;
-        if (!_p.dst.isConnected())
-        {   _p.cmds.unshift(cmd);
-            Log(`Waiting for destination connection : ${_p.dst.args.name}`);
-            return false;
+        if (needDst)
+        {   if(!_p.dst)
+                return reject(`Command requires destination : ${cmd}`);
+            if (!_p.dst.isConnected())
+                return reject(`Waiting for destination connection : ${_p.dst.args.name}`);
         }
-    }
-    return true;
+        resolve(true);
+    });
 }
 
 /**
@@ -97,95 +94,95 @@ function nextCommand(_p)
     if (1 > _p.cmds.length)
         return Promise.resolve(true);
 
-    return new Promise((resolve, reject) =>
-    {
-        let resources = [];
+    let resources = [];
 
-        if (!_p.src && _p.source)
-        {   _p.src = fmeld.getConnection(_p.source, _p['source-cred'], {..._p, readonly: true});
-            resources.push(_p.src.connect());
-        }
+    if (!_p.src && _p.source)
+    {   _p.src = fmeld.getConnection(_p.source, _p['source-cred'], {..._p, readonly: true});
+        resources.push(_p.src.connect());
+    }
 
-        if (!_p.dst && _p.dest)
-        {   _p.dst = fmeld.getConnection(_p.dest, _p['dest-cred'], _p);
-            resources.push(_p.dst.connect());
-        }
+    if (!_p.dst && _p.dest)
+    {   _p.dst = fmeld.getConnection(_p.dest, _p['dest-cred'], _p);
+        resources.push(_p.dst.connect());
+    }
 
-        Promise.all(resources)
-            .then((r) =>
+    return Promise.all(resources)
+        .then(r =>
+        {
+            let cmd = _p.cmds[0];
+            switch(cmd)
             {
-                let cmd = _p.cmds[0];
-                switch(cmd)
-                {
-                    case 'ls':
-                    case 'lsl':
-                        if (!isReady(_p, cmd, true, false))
-                            return;
-                        lsl(_p, _p.src.makePath())
-                            .then((r) =>
-                            {
-                                if (r && 'totalfiles' in r)
+                case 'md':
+                    return isReady(_p, cmd, true, false)
+                        .then(r => { return _p.src.mkDir(_p.src.makePath(), _p); });
+
+                case 'rm':
+                    return isReady(_p, cmd, true, false)
+                        .then(r => { return _p.src.rmDir(_p.src.makePath(), _p); });
+
+                case 'unlink':
+                    return isReady(_p, cmd, true, false)
+                        .then(r => { return _p.src.rmFile(_p.src.makePath()); });
+
+                case 'ls':
+                    return isReady(_p, cmd, true, false)
+                        .then(r =>
+                        {
+                            return lsl(_p, _p.src.makePath())
+                                .then((r) =>
                                 {
-                                    let tf = r.totalfiles, td = r.totaldirs, tsz = r.totalsize;
-                                    if (!_p['raw-size'])
-                                        tsz = fmeld.toHuman(tsz);
-                                    console.log('');
-                                    Log(`Directories: ${td}, Files: ${tf}, Size: ${tsz}\n`);
-                                }
-                                resolve(true);
-                            })
-                            .catch((e) => { reject(e); });
-                        break;
+                                    if (r && 'totalfiles' in r)
+                                    {   let tf = r.totalfiles, td = r.totaldirs, tsz = r.totalsize;
+                                        if (!_p['raw-size'])
+                                            tsz = fmeld.toHuman(tsz);
+                                        console.log('');
+                                        Log(`Directories: ${td}, Files: ${tf}, Size: ${tsz}\n`);
+                                    }
+                                });
+                        });
 
-                    case 'cp':
-                        if (!isReady(_p, cmd, true, true))
-                            return;
+                case 'cp':
+                    return isReady(_p, cmd, true, true)
+                        .then(r =>
+                        {
+                            // Copy the directory
+                            return fmeld.copyDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(),
+                                            {   recursive       : _p.recursive ? true : false,
+                                                flatten         : _p.flatten ? true : false,
+                                                skip            : _p.skip ? true : false,
+                                                timestamp       : _p.timestamp ? true : false,
+                                                detailed        : _p.detailed ? true : false,
+                                                filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
+                                                filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : '',
+                                                progress        : fmeld.stdoutProgress
+                                            });
+                        });
 
-                        // Copy the directory
-                        fmeld.copyDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(),
-                                        {   recursive       : _p.recursive ? true : false,
-                                            flatten         : _p.flatten ? true : false,
-                                            skip            : _p.skip ? true : false,
-                                            timestamp       : _p.timestamp ? true : false,
-                                            detailed        : _p.detailed ? true : false,
-                                            filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
-                                            filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : '',
-                                            progress        : fmeld.stdoutProgress
-                                        })
-                            .then((r) => { resolve(true); })
-                            .catch((e)=>{ reject(e); });
+                case 'sync':
+                    return isReady(_p, cmd, true, true)
+                        .then(r =>
+                        {
+                            // Copy the directory
+                            return fmeld.syncDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(),
+                                            {   recursive       : _p.recursive ? true : false,
+                                                less            : _p.less ? true : false,
+                                                compare         : 'size,date',
+                                                upload          : _p.upload ? true : false,
+                                                download        : _p.download ? true : false,
+                                                flatten         : _p.flatten ? true : false,
+                                                skip            : _p.skip ? true : false,
+                                                timestamp       : _p.timestamp ? true : false,
+                                                detailed        : _p.detailed ? true : false,
+                                                filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
+                                                filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : '',
+                                                progress        : fmeld.stdoutProgress
+                                            });
+                        });
 
-                        break;
-
-                    case 'sync':
-                        if (!isReady(_p, cmd, true, true))
-                            return;
-
-                        // Copy the directory
-                        fmeld.syncDir(_p.src, _p.dst, _p.src.makePath(), _p.dst.makePath(),
-                                        {   recursive       : _p.recursive ? true : false,
-                                            less            : _p.less ? true : false,
-                                            compare         : 'size,date',
-                                            upload          : _p.upload ? true : false,
-                                            download        : _p.download ? true : false,
-                                            flatten         : _p.flatten ? true : false,
-                                            skip            : _p.skip ? true : false,
-                                            timestamp       : _p.timestamp ? true : false,
-                                            detailed        : _p.detailed ? true : false,
-                                            filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
-                                            filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : '',
-                                            progress        : fmeld.stdoutProgress
-                                        })
-                            .then((r) => { resolve(true); })
-                            .catch((e)=>{ reject(e); });
-
-                        break;
-
-                    default:
-                        reject(`Unknown command ${cmd}`);
-                }
-            })
-            .catch((e)=>{ reject(e); });
+                default:
+                    _p.cmds.shift();
+                    throw `Unknown command ${cmd}`;
+            }
         });
 }
 
@@ -210,7 +207,7 @@ function closeAll(_p)
 function main()
 {
     // Parse command line
-    let _p = fmeld.__config__.parseParams('fmeld [options] [commands ...]', process.argv,
+    let _p = fmeld.__config__.parseParams('fmeld [options] [ls|cp|sync|md|rm|unlink]', process.argv,
         [   ['s', 'source=',        'Source URL'],
             ['S', 'source-cred=',   'Source Credentials.  Can be file / dir / environment variable'],
             ['d', 'dest=',          'Destination URL'],
@@ -283,10 +280,15 @@ function main()
                 {
                     Log(_p.verbose ? e : String(e));
                     closeAll(_p);
+
+                    if (0 >= _p.cmds.length)
+                        return resolve(true);
+
                     if (0 < retry)
                         retry--;
+
                     if (!retry)
-                        resolve(true);
+                        return resolve(true);
                     else
                     {   Log(`Retrying, retry count : ${(0 <= retry) ? retry : 'Infinite'}`);
                         setTimeout(()=>{ resolve(true); }, 3000);
@@ -296,7 +298,7 @@ function main()
     })
     .then((r) =>
     {
-        if (!retry)
+        if (1 != _p.retry && !retry)
             Log('Out of retries');
         else if (_p.verbose)
             Log('Done');

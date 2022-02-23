@@ -1,7 +1,7 @@
 
 # fmeld
 
-Sync files between local drive, ftp, sftp, google cloud storage, google drive
+Sync files between local drive, ftp, sftp, Google Cloud Storage, Google Drive, and Dropbox
 
 
 ``` bash
@@ -23,6 +23,9 @@ Sync files between local drive, ftp, sftp, google cloud storage, google drive
 
     # Sync files from google drive to sftp server
     fmeld -S ./google-credentials.json -s gdrive://path/to/files -d sftp://user@127.0.0.1:22/upload/location sync -Ur
+
+    # Sync files from google drive to dropbox
+    fmeld -S ./google-credentials.json -s gdrive://path/to/files -E ./dropbox-credentials.json -d dropbox:///upload/location sync -Ur
 
 ```
 &nbsp;
@@ -107,6 +110,9 @@ Using from the command line
 
     # Sync files from google drive to sftp server
     fmeld -S ./google-credentials.json -s gdrive://path/to/files -d sftp://user@127.0.0.1:22/upload/location sync -Ur
+
+    # Sync files from google drive to dropbox
+    fmeld -S ./google-credentials.json -s gdrive://path/to/files -E ./dropbox-credentials.json -d dropbox:///upload/location sync -Ur
 
 ```
 

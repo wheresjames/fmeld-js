@@ -1,4 +1,9 @@
 
+# v0.1.7 - 2022-02-22
+
+[+] Uploading to google drive is working
+[+] Dropbox support is working
+
 # v0.1.6 - 2022-02-21
 
 [+] Support for downloading files from google drive
