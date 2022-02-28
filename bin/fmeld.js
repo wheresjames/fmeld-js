@@ -154,7 +154,8 @@ function nextCommand(_p)
                                                 detailed        : _p.detailed ? true : false,
                                                 filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
                                                 filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : '',
-                                                progress        : fmeld.stdoutProgress
+                                                progress        : fmeld.stdoutProgress,
+                                                verbose         : _p.verbose ? true : false
                                             });
                         });
 
@@ -175,7 +176,8 @@ function nextCommand(_p)
                                                 detailed        : _p.detailed ? true : false,
                                                 filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
                                                 filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : '',
-                                                progress        : fmeld.stdoutProgress
+                                                progress        : fmeld.stdoutProgress,
+                                                verbose         : _p.verbose ? true : false
                                             });
                         });
 
