@@ -228,6 +228,7 @@ function main()
             ['k', 'skip',           'Skip files that fail'],
             ['t', 'timestamp',      'Always show timestamp'],
             ['i', 'detailed',       'Show detailed progress info'],
+            ['p', 'authport',       'Port used for OAuth, for no reason, the default is 19227'],
             ['v', 'version',        'Show version'],
             ['V', 'verbose',        'Verbose logging']
         ]);
@@ -252,6 +253,9 @@ function main()
         _p.retry = 1;
     else
         _p.retry = parseInt(_p.retry);
+
+    if (!_p.authport)
+        _p.authport = 19227;
 
     // Build commands
     _p.cmds = [];

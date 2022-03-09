@@ -1,3 +1,8 @@
+# v0.1.9 - 2022-03-02
+
+[+] Support dropbox session uploading
+[+] HTTP server for OAuth redirect
+
 # v0.1.8 - 2022-02-27
 
 [+] Improved error reporting
