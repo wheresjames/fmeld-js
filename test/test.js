@@ -26,7 +26,7 @@ function test_1()
 
     // Copy files from fake tree to temp directory
     (async() => {
-        await fmeld.copyDir(fake, tmpd, fake.makePath(), tmpd.makePath(), {recursive: true}, fmeld.stdoutProgress)
+        await fmeld.copyDir(fake, tmpd, fake.makePath(), tmpd.makePath(), {recursive: true, batch: 4}, fmeld.stdoutProgress)
                 .then((r) => { Log(`Done: ${r}`); })
                 .catch((e)=>{ Log(e); failed = e; });
     })();

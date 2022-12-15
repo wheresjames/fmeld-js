@@ -1,6 +1,6 @@
 name            fmeld
-version         0.1.9
-description     Sync files between local drive, ftp, sftp, GCS, Google Drive, Dropbox
+version         0.1.11
+description     Sync files between local drives, ftp, sftp, GCS, Google Drive, Dropbox
 company         wheresjames
 author          Robert Umbehant
 email           fmeld@wheresjames.com

@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const fmeld = require('fmeld');
+const chrono = require('chrono-node');
 
 /// Default logging function
 var Log = console.log;
@@ -45,10 +46,15 @@ function isReady(_p, cmd, needSrc, needDst)
 /**
     @param [in] _p      - Property bag
     @param [in] fp      - Root file path
+    @param [in] opts    - Options
+                            batch = Batch size for fetching sub directories
     @param [in] stats   - Stat totals
 */
-function lsl(_p, fp, stats={totalsize: 0, totalfiles: 0, totaldirs: 0})
+function lsl(_p, fp, opts, stats={totalsize: 0, totalfiles: 0, totaldirs: 0})
 {
+    if (!opts.batch)
+        opts.batch = 1;
+
     Log(`[${_p.src.getPrefix(fp)}]`);
     return _p.src.ls(fp)
         .then((r)=>
@@ -75,13 +81,13 @@ function lsl(_p, fp, stats={totalsize: 0, totalfiles: 0, totaldirs: 0})
                 }
 
             if (!subs.length)
-                return Promise.resolve(stats);
+                return stats;
 
             // List sub directories
-            return fmeld.promiseWhile(() => 0 < subs.length, () =>
+            return fmeld.promiseWhileBatch(opts.batch, () => 0 < subs.length, () =>
             {   let next = subs.shift();
-                return next ? lsl(_p, next, stats) : Promise.resolve(stats);
-            });
+                return next ? lsl(_p, next, opts, stats) : stat;
+            }).then(r=>stats);
         })
         .catch((e)=>{ Log(_p.verbose ? e : String(e)); });
 }
@@ -128,7 +134,7 @@ function nextCommand(_p)
                     return isReady(_p, cmd, true, false)
                         .then(r =>
                         {
-                            return lsl(_p, _p.src.makePath())
+                            return lsl(_p, _p.src.makePath(), {batch: _p.batch})
                                 .then((r) =>
                                 {
                                     if (r && 'totalfiles' in r)
@@ -154,6 +160,9 @@ function nextCommand(_p)
                                                 detailed        : _p.detailed ? true : false,
                                                 filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
                                                 filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : '',
+                                                after           : _p.after ? _p.after : 0,
+                                                before          : _p.before ? _p.before : 0,
+                                                batch           : _p.batch,
                                                 progress        : fmeld.stdoutProgress,
                                                 verbose         : _p.verbose ? true : false
                                             });
@@ -176,12 +185,37 @@ function nextCommand(_p)
                                                 detailed        : _p.detailed ? true : false,
                                                 filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
                                                 filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : '',
+                                                after           : _p.after ? _p.after : 0,
+                                                before          : _p.before ? _p.before : 0,
+                                                batch           : _p.batch,
                                                 progress        : fmeld.stdoutProgress,
                                                 verbose         : _p.verbose ? true : false
                                             });
                         });
 
-                default:
+                case 'clean':
+                    return isReady(_p, cmd, true, false)
+                        .then(r =>
+                        {
+                            // Clean the directory
+                            return fmeld.cleanDir(_p.src, _p.src.makePath(),
+                                            {   recursive       : _p.recursive ? true : false,
+                                                filterFiles     : _p['filter-files'] ? _p['filter-files'] : '',
+                                                filterDirs      : _p['filter-dirs'] ? _p['filter-dirs'] : '',
+                                                after           : _p.after ? _p.after : 0,
+                                                before          : _p.before ? _p.before : 0,
+                                                fnametime       : _p.fnametime,
+                                                'clean-files'   : _p['clean-files'],
+                                                'clean-dirs'    : _p['clean-dirs'],
+                                                minsize         : _p.minsize,
+                                                maxsize         : _p.maxsize,
+                                                batch           : _p.batch,
+                                                less            : _p.less ? true : false,
+                                                verbose         : _p.verbose ? true : false
+                                            });
+                        });
+
+                        default:
                     _p.cmds.shift();
                     throw `Unknown command ${cmd}`;
             }
@@ -209,7 +243,7 @@ function closeAll(_p)
 function main()
 {
     // Parse command line
-    let _p = fmeld.__config__.parseParams('fmeld [options] [ls|cp|sync|md|rm|unlink]', process.argv,
+    let _p = fmeld.__config__.parseParams('fmeld [options] [ls|cp|sync|md|rm|unlink|clean]', process.argv,
         [   ['s', 'source=',        'Source URL'],
             ['S', 'source-cred=',   'Source Credentials.  Can be file / dir / environment variable'],
             ['d', 'dest=',          'Destination URL'],
@@ -229,6 +263,15 @@ function main()
             ['t', 'timestamp',      'Always show timestamp'],
             ['i', 'detailed',       'Show detailed progress info'],
             ['p', 'authport',       'Port used for OAuth, for no reason, the default is 19227'],
+            ['b', 'batch=',         'How many concurrent opererations to allow, default is 1'],
+            ['',  'before=',        'Show files before this timestamp'],
+            ['',  'after=',         'Show files after this timestamp'],
+            ['',  'minsize=',       'Minimum file size for cleaning'],
+            ['',  'maxsize=',       'Maximum file size for cleaning'],
+            ['',  'fnametime=',     'Regex that extracts the file or directory time from the name, Ex: [^/]+$'],
+            ['',  'clean-files',    'Files should be deleted while cleaning'],
+            ['',  'clean-dirs',     'Directories should be deleted while cleaning'],
+            ['',  'clean-all',      'Files and directories should be deleted while cleaning'],
             ['v', 'version',        'Show version'],
             ['V', 'verbose',        'Verbose logging']
         ]);
@@ -254,8 +297,26 @@ function main()
     else
         _p.retry = parseInt(_p.retry);
 
+    if (!_p.batch)
+        _p.batch = 1;
+    else
+        _p.batch = parseInt(_p.batch);
+
+    if (_p['clean-all'])
+        _p['clean-files'] = true, _p['clean-dirs'] = true;
+
     if (!_p.authport)
         _p.authport = 19227;
+
+    if (_p.before)
+    {   try { _p.before = parseInt(chrono.parse(_p.before)[0].date().getTime() / 1000); }
+        catch(e) { throw `Invalid before time : ${_p.before}`; }
+    }
+
+    if (_p.after)
+    {   try { _p.after = parseInt(chrono.parse(_p.after)[0].date().getTime() / 1000); }
+        catch(e) { throw `Invalid after time : ${_p.after}`; }
+    }
 
     // Build commands
     _p.cmds = [];
@@ -315,9 +376,10 @@ function main()
 }
 
 // Exit handling
-process.on('exit', function() {});
-process.on('SIGINT', function() { Log('~ keyboard ~'); process.exit(-1); });
-process.on('uncaughtException', function(e) { Log('~ uncaught ~', e); process.exit(-1); });
+process.on('exit',() => {});
+process.on('SIGINT',() => { Log('~ ctrl+c ~'); process.exit(-1); });
+process.on('uncaughtException',(e) => { Log('~ uncaught ~', e); process.exit(-1); });
+process.on('unhandledRejection',(r, p) => { Log('~ unhandled ~', r, p); process.exit(-1); });
 
 // Run the program
 main();

@@ -1,7 +1,7 @@
 
 # fmeld
 
-Sync files between local drive, ftp, sftp, Google Cloud Storage, Google Drive, and Dropbox
+Sync files between local drives, ftp, sftp, Google Cloud Storage, Google Drive, and Dropbox
 
 
 ``` bash
@@ -26,6 +26,9 @@ Sync files between local drive, ftp, sftp, Google Cloud Storage, Google Drive, a
 
     # Sync files from google drive to dropbox
     fmeld -S ./google-credentials.json -s gdrive://path/to/files -E ./dropbox-credentials.json -d dropbox:///upload/location sync -Ur
+
+    # Clean up files from temp that are over one day old
+    fmeld -s file:///tmp clean --before "1 day ago" --fnametime "([^/]+)$" --clean-all
 
 ```
 &nbsp;
@@ -54,31 +57,48 @@ Sync files between local drive, ftp, sftp, Google Cloud Storage, Google Drive, a
 ## Command Line
 
 ```
-fmeld [options] [commands ...]
+fmeld [options] [ls|cp|sync|md|rm|unlink|clean]
 
  --- OPTIONS ---
 
-  -s  --source         [arg]   -  Source URL
-  -S  --source-cred    [arg]   -  Source Credentials.  Can be file / dir / environment variable
-  -d  --dest           [arg]   -  Destination URL
-  -E  --dest-cred      [arg]   -  Destination Credentials.  Can be file / dir / environment variable
-  -c  --cred-root      [arg]   -  Credentials root.  Can be a directory or environment variable
-  -u  --uncached       [arg]   -  Do not use any cached credentials.
-  -f  --filter-files   [arg]   -  Filter files based on regex expression
-  -F  --filter-dirs    [arg]   -  Filter directories based on regex expression
-  -r  --recursive              -  Recurse into sub directories
-  -D  --download               -  Download missing files from destination to source
-  -U  --upload                 -  Upload changed or missing files from source to destination
-  -G  --flatten                -  Flatten the directory structure
-  -l  --less                   -  Show less console output
-  -z  --raw-size               -  Show raw file size
-  -x  --retry          [arg]   -  Number of times to retry
-  -k  --skip                   -  Skip files that fail
-  -t  --timestamp              -  Always show timestamp
-  -i  --detailed               -  Show detailed progress info
-  -v  --version                -  Show version
-  -V  --verbose                -  Verbose logging
-  -h  --help                   -  Display help
+ -s --source       [arg] - Source URL
+ -S --source-cred  [arg] - Source Credentials.
+                           Can be file / dir / environment variable
+ -d --dest         [arg] - Destination URL
+ -E --dest-cred    [arg] - Destination Credentials.
+                           Can be file / dir / environment variable
+ -c --cred-root    [arg] - Credentials root.
+                           Can be a directory or environment variable
+ -u --uncached     [arg] - Do not use any cached credentials.
+ -f --filter-files [arg] - Filter files based on regex expression
+ -F --filter-dirs  [arg] - Filter directories based on regex expression
+ -r --recursive          - Recurse into sub directories
+ -D --download           - Download missing files from destination to source
+ -U --upload             - Upload changed or missing files from source to
+                           destination
+ -G --flatten            - Flatten the directory structure
+ -l --less               - Show less console output
+ -z --raw-size           - Show raw file size
+ -x --retry        [arg] - Number of times to retry
+ -k --skip               - Skip files that fail
+ -t --timestamp          - Always show timestamp
+ -i --detailed           - Show detailed progress info
+ -p --authport           - Port used for OAuth, the default is 19227
+ -b --batch        [arg] - How many concurrent opererations to allow,
+                           The default is 1
+    --before       [arg] - Show files before this timestamp
+    --after        [arg] - Show files after this timestamp
+    --minsize      [arg] - Minimum file size for cleaning
+    --maxsize      [arg] - Maximum file size for cleaning
+    --fnametime    [arg] - Regex that extracts the file or directory time
+                           from the name, Ex: [^/]+$
+    --clean-files        - Files will be deleted while cleaning
+    --clean-dirs         - Directories will be deleted while cleaning
+    --clean-all          - Files and directories will be deleted while
+                           cleaning
+ -v --version            - Show version
+ -V --verbose            - Verbose logging
+ -h --help               - Display help
 
 ```
 
