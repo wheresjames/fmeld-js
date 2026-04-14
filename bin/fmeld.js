@@ -6,6 +6,16 @@ const path = require('path');
 const fmeld = require('fmeld');
 const chrono = require('chrono-node');
 
+/// Masks password in a URL string for safe logging
+function maskUrl(url)
+{   try
+    {   let u = new URL(url);
+        if (u.password) u.password = '***';
+        return u.toString();
+    }
+    catch(e) { return url; }
+}
+
 /// Default logging function
 var Log = console.log;
 var tsLog = (...args) =>
@@ -281,7 +291,10 @@ function main()
     {   const sparen = require('sparen');
         Log = sparen.log;
         Log('Program Info: ', JSON.stringify(fmeld.__info__, null, 2));
-        Log('Program Arguments: ', JSON.stringify(_p, null, 2));
+        let safeP = {..._p};
+        if (safeP.source) safeP.source = maskUrl(safeP.source);
+        if (safeP.dest) safeP.dest = maskUrl(safeP.dest);
+        Log('Program Arguments: ', JSON.stringify(safeP, null, 2));
     }
     else if (_p.timestamp)
         Log = tsLog;
