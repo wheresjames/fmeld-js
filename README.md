@@ -1,7 +1,7 @@
 
 # fmeld
 
-Move and sync files between local drives, FTP, SFTP, Google Cloud Storage, Google Drive, and Dropbox — from one command line tool or Node.js library.
+Move and sync files between local drives, FTP, SFTP, Google Cloud Storage, Google Drive, Dropbox, and Amazon S3 — from one command line tool or Node.js library.
 
 ```bash
 # Copy a local folder up to an FTP server
@@ -35,6 +35,7 @@ fmeld -s file:///tmp clean --before "1 day ago" --clean-all
   - [Clean old files](#clean-old-files)
 - [Using as a library](#using-as-a-library)
 - [Setting up cloud credentials](#setting-up-cloud-credentials)
+  - [Amazon S3](#amazon-s3)
   - [Google Cloud Storage](#google-cloud-storage)
   - [Google Drive](#google-drive)
   - [Dropbox](#dropbox)
@@ -69,6 +70,7 @@ npm install fmeld
 | Google Cloud Storage | `gs://` or `gcs://` | Service account JSON |
 | Google Drive | `gdrive://` | OAuth2, token cached after first login |
 | Dropbox | `dropbox://` | OAuth2, token cached after first login |
+| Amazon S3 | `s3://` | IAM credentials JSON or environment variables |
 
 &nbsp;
 
@@ -89,6 +91,8 @@ sftp://alice@sftp.example.com:22/backups
 gs://my-bucket/some/prefix
 gdrive://My Drive/project-files
 dropbox:///camera-uploads
+s3://my-bucket/some/prefix
+s3://my-bucket/path?region=eu-west-1
 ```
 
 Query string parameters are passed through as extra options to the backend driver.
@@ -229,6 +233,12 @@ fmeld -s sftp://user@myserver.com/data ls -r
 
 # List a Google Cloud Storage bucket
 fmeld -S ./gcs-credentials.json -s gs://my-bucket/reports ls
+
+# List an S3 bucket
+fmeld -S ./s3-credentials.json -s s3://my-bucket/reports ls
+
+# List an S3 bucket using environment variables for credentials
+fmeld -s s3://my-bucket/reports ls
 ```
 
 ### Copy files
@@ -269,6 +279,14 @@ fmeld -S ./gdrive-creds.json \
 # Sync Google Drive to Dropbox, 4 files at a time
 fmeld -S ./gdrive-creds.json  -s gdrive://backups \
       -E ./dropbox-creds.json -d dropbox:///backups sync -Ur -b 4
+
+# Sync a local directory up to S3
+fmeld -S ./s3-creds.json -s file:///home/user/backups \
+      -d s3://my-bucket/backups sync -Ur
+
+# Sync from S3 to a local directory
+fmeld -S ./s3-creds.json -s s3://my-bucket/backups \
+      -d file:///home/user/backups sync -Dr
 
 # Sync only .log files
 fmeld -s sftp://user@myserver.com/logs \
@@ -378,6 +396,7 @@ fmeld.sftpClient(args, opts)
 fmeld.gcsClient(args, opts)
 fmeld.gdriveClient(args, opts)
 fmeld.dropboxClient(args, opts)
+fmeld.s3Client(args, opts)
 ```
 
 All client objects expose the same interface:
@@ -401,6 +420,58 @@ client.isConnected()              // Returns boolean
 ---
 
 ## Setting up cloud credentials
+
+### Amazon S3
+
+fmeld can authenticate with S3 in two ways:
+
+**Option 1 — Credentials JSON file** (recommended for explicit control)
+
+Create a JSON file with your IAM access key:
+
+```json
+{
+    "access_key_id":     "AKIAIOSFODNN7EXAMPLE",
+    "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "region":            "us-east-1"
+}
+```
+
+Pass the file with `-S` (source) or `-E` (destination):
+
+```bash
+fmeld -S ./s3-creds.json -s s3://my-bucket/backups ls
+fmeld -S ./s3-creds.json -s file:///home/user/data -d s3://my-bucket/data cp -r
+```
+
+**Option 2 — Environment variables** (no credential file needed)
+
+Set the standard AWS environment variables and omit `-S` / `-E`:
+
+```bash
+export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+export AWS_DEFAULT_REGION=us-east-1
+fmeld -s s3://my-bucket/backups ls
+```
+
+The AWS SDK also honours `~/.aws/credentials` and IAM instance roles automatically.
+
+**Specifying the region or a custom endpoint via the URL**
+
+```bash
+# Override region in the URL query string
+fmeld -S ./s3-creds.json -s 's3://my-bucket/data?region=eu-west-1' ls
+
+# Use an S3-compatible service (MinIO, Wasabi, Cloudflare R2, …)
+fmeld -S ./s3-creds.json -s 's3://my-bucket/data?endpoint=https://s3.example.com' ls
+```
+
+To generate IAM credentials, go to the [AWS IAM Console](https://console.aws.amazon.com/iam/), create a user with `AmazonS3FullAccess` (or a least-privilege policy), and create an access key under **Security credentials**.
+
+&nbsp;
+
+---
 
 ### Google Cloud Storage
 
@@ -448,6 +519,7 @@ fmeld -E ./dropbox-creds.json -d dropbox:///uploads ls
 ```
 
 &nbsp;
+
 
 ---
 
