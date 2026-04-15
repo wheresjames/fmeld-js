@@ -8,6 +8,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 
 const fmeld = require('..');
+const setup = require('..').setup;
 
 // ---------------------------------------------------------------------------
 // Optional-dependency availability checks
@@ -16,7 +17,7 @@ const fmeld = require('..');
 function pkgAvailable(name) { try { require(name); return true; } catch { return false; } }
 
 // Use fmeld's own pkgAvailable so we test the real implementation
-const { pkgAvailable: setupPkgAvailable } = require('..').setup;
+const { pkgAvailable: setupPkgAvailable } = setup;
 
 const HAS_S3     = pkgAvailable('@aws-sdk/client-s3') && pkgAvailable('@aws-sdk/lib-storage');
 const HAS_WEBDAV = pkgAvailable('webdav');
@@ -777,6 +778,298 @@ describe('smbClient', { skip: !HAS_SMB2 ? '@marsaud/smb2 package not installed' 
         const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
         for (const m of METHODS)
             assert.equal(typeof c[m], 'function', `missing: ${m}`);
+    });
+});
+
+describe('smbClient mocked behavior', () =>
+{
+    function withMockedSmb2(FakeSMB2, fn)
+    {
+        const originalRequireBackend = setup.requireBackend;
+        setup.requireBackend = () => FakeSMB2;
+        return Promise.resolve()
+            .then(fn)
+            .finally(() =>
+            {
+                setup.requireBackend = originalRequireBackend;
+            });
+    }
+
+    test('ls filters dot directory entries', async () =>
+    {
+        class FakeSMB2
+        {
+            constructor() {}
+            disconnect(cb) { cb(null); }
+            readdir(dir, options, cb)
+            {
+                assert.equal(dir, 'uploads\\run\\smb');
+                assert.deepEqual(options, {stats: true});
+                cb(null,
+                    [
+                        {
+                            name: '.',
+                            isDirectory: () => true,
+                            size: 0,
+                            mtime: new Date(0),
+                            atime: new Date(0),
+                            ctime: new Date(0)
+                        },
+                        {
+                            name: '..',
+                            isDirectory: () => true,
+                            size: 0,
+                            mtime: new Date(0),
+                            atime: new Date(0),
+                            ctime: new Date(0)
+                        },
+                        {
+                            name: 'nested',
+                            isDirectory: () => true,
+                            size: 0,
+                            mtime: new Date(0),
+                            atime: new Date(0),
+                            ctime: new Date(0)
+                        }
+                    ]);
+            }
+        }
+
+        await withMockedSmb2(FakeSMB2, async () =>
+        {
+            const client = fmeld.getConnection('smb://user:pass@server/share/uploads/run/smb', null, {verbose: false});
+            await client.connect();
+            const entries = await client.ls(client.makePath());
+            assert.deepEqual(entries.map(v => v.name), ['nested']);
+            await client.close();
+        });
+    });
+
+    test('ls uses stats-aware readdir entries directly', async () =>
+    {
+        class FakeSMB2
+        {
+            constructor() {}
+            disconnect(cb) { cb(null); }
+            readdir(dir, options, cb)
+            {
+                assert.equal(dir, 'uploads\\run\\smb');
+                assert.deepEqual(options, {stats: true});
+                cb(null,
+                    [
+                        {
+                            name: 'nested',
+                            isDirectory: () => true,
+                            size: 0,
+                            mtime: new Date(0),
+                            atime: new Date(0),
+                            ctime: new Date(0)
+                        },
+                        {
+                            name: 'gone.txt',
+                            isDirectory: () => false,
+                            size: 0,
+                            mtime: new Date(0),
+                            atime: new Date(0),
+                            ctime: new Date(0)
+                        }
+                    ]);
+            }
+        }
+
+        await withMockedSmb2(FakeSMB2, async () =>
+        {
+            const client = fmeld.getConnection('smb://user:pass@server/share/uploads/run/smb', null, {verbose: false});
+            await client.connect();
+            const entries = await client.ls(client.makePath());
+            assert.deepEqual(entries.map(v => v.name), ['nested', 'gone.txt']);
+            await client.close();
+        });
+    });
+
+    test('rmDir retries STATUS_DIRECTORY_NOT_EMPTY after child deletes', async () =>
+    {
+        const state = {
+            dirs: new Set(['', 'uploads', 'uploads/run', 'uploads/run/smb', 'uploads/run/smb/nested']),
+            files: new Set(['uploads/run/smb/nested/echo.txt']),
+            failRootOnce: true
+        };
+
+        function normalize(target)
+        {
+            return String(target || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        }
+
+        function childNames(dir)
+        {
+            const prefix = dir ? `${dir}/` : '';
+            const out = new Set();
+
+            for (const entry of [...state.dirs, ...state.files])
+            {
+                if (!entry.startsWith(prefix) || entry === dir)
+                    continue;
+
+                const rest = entry.slice(prefix.length);
+                const name = rest.split('/')[0];
+                if (name)
+                    out.add(name);
+            }
+
+            return [...out];
+        }
+
+        class FakeSMB2
+        {
+            constructor() {}
+            disconnect(cb) { cb(null); }
+            readdir(dir, options, cb)
+            {
+                assert.deepEqual(options, {stats: true});
+                const out = childNames(normalize(dir)).map(name =>
+                {
+                    const norm = normalize(dir) ? `${normalize(dir)}/${name}` : name;
+                    const isDir = state.dirs.has(norm);
+                    return {
+                        name,
+                        isDirectory: () => isDir,
+                        size: isDir ? 0 : 18,
+                        mtime: new Date(0),
+                        atime: new Date(0),
+                        ctime: new Date(0)
+                    };
+                });
+                cb(null, out);
+            }
+            unlink(target, cb)
+            {
+                state.files.delete(normalize(target));
+                cb(null);
+            }
+            rmdir(target, cb)
+            {
+                const norm = normalize(target);
+                if (!state.dirs.has(norm))
+                    return cb({code: 'STATUS_OBJECT_NAME_NOT_FOUND'});
+
+                const hasChildren = childNames(norm).length > 0;
+                if (hasChildren)
+                    return cb({code: 'STATUS_DIRECTORY_NOT_EMPTY'});
+
+                if (norm === 'uploads/run/smb' && state.failRootOnce)
+                {
+                    state.failRootOnce = false;
+                    return cb({code: 'STATUS_DIRECTORY_NOT_EMPTY'});
+                }
+
+                state.dirs.delete(norm);
+                cb(null);
+            }
+        }
+
+        await withMockedSmb2(FakeSMB2, async () =>
+        {
+            const client = fmeld.getConnection('smb://user:pass@server/share/uploads/run/smb', null, {verbose: false});
+            await client.connect();
+            await client.rmDir(client.makePath(), {recursive: true, rmDirRetries: 1, rmDirRetryDelayMs: 0});
+            assert.equal(state.dirs.has('uploads/run/smb'), false);
+            assert.equal(state.dirs.has('uploads/run/smb/nested'), false);
+            assert.equal(state.files.size, 0);
+            await client.close();
+        });
+    });
+
+    test('rmDir retries STATUS_DELETE_PENDING while directory removal settles', async () =>
+    {
+        const state = {
+            dirs: new Set(['', 'uploads', 'uploads/run', 'uploads/run/smb', 'uploads/run/smb/nested']),
+            files: new Set(['uploads/run/smb/nested/echo.txt']),
+            failNestedStatDeletePendingOnce: true
+        };
+
+        function normalize(target)
+        {
+            return String(target || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        }
+
+        function childNames(dir)
+        {
+            const prefix = dir ? `${dir}/` : '';
+            const out = new Set();
+
+            for (const entry of [...state.dirs, ...state.files])
+            {
+                if (!entry.startsWith(prefix) || entry === dir)
+                    continue;
+
+                const rest = entry.slice(prefix.length);
+                const name = rest.split('/')[0];
+                if (name)
+                    out.add(name);
+            }
+
+            return [...out];
+        }
+
+        class FakeSMB2
+        {
+            constructor() {}
+            disconnect(cb) { cb(null); }
+            readdir(dir, options, cb)
+            {
+                assert.deepEqual(options, {stats: true});
+                const normDir = normalize(dir);
+                if (normDir === 'uploads/run/smb' && state.failNestedStatDeletePendingOnce)
+                {
+                    state.failNestedStatDeletePendingOnce = false;
+                    return cb({code: 'STATUS_DELETE_PENDING'});
+                }
+
+                const out = childNames(normDir).map(name =>
+                {
+                    const norm = normDir ? `${normDir}/${name}` : name;
+                    const isDir = state.dirs.has(norm);
+                    return {
+                        name,
+                        isDirectory: () => isDir,
+                        size: isDir ? 0 : 18,
+                        mtime: new Date(0),
+                        atime: new Date(0),
+                        ctime: new Date(0)
+                    };
+                });
+                cb(null, out);
+            }
+            unlink(target, cb)
+            {
+                state.files.delete(normalize(target));
+                cb(null);
+            }
+            rmdir(target, cb)
+            {
+                const norm = normalize(target);
+                if (!state.dirs.has(norm))
+                    return cb({code: 'STATUS_OBJECT_NAME_NOT_FOUND'});
+
+                const hasChildren = childNames(norm).length > 0;
+                if (hasChildren)
+                    return cb({code: 'STATUS_DIRECTORY_NOT_EMPTY'});
+
+                state.dirs.delete(norm);
+                cb(null);
+            }
+        }
+
+        await withMockedSmb2(FakeSMB2, async () =>
+        {
+            const client = fmeld.getConnection('smb://user:pass@server/share/uploads/run/smb', null, {verbose: false});
+            await client.connect();
+            await client.rmDir(client.makePath(), {recursive: true, rmDirRetries: 1, rmDirRetryDelayMs: 0});
+            assert.equal(state.dirs.has('uploads/run/smb'), false);
+            assert.equal(state.dirs.has('uploads/run/smb/nested'), false);
+            assert.equal(state.files.size, 0);
+            await client.close();
+        });
     });
 });
 
