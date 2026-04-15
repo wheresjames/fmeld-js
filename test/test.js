@@ -1153,6 +1153,24 @@ describe('fileClient', () =>
         assert.ok(client.getPrefix('/some/path').startsWith('file://'));
     });
 
+    test('getConnection file url does not emit warning without creds', () =>
+    {
+        const warnings = [];
+        const onWarning = (warning) => warnings.push(warning);
+        process.on('warning', onWarning);
+
+        try
+        {
+            const client = fmeld.getConnection('file:///tmp', null, {verbose: false});
+            assert.ok(client);
+            assert.equal(warnings.some(w => String(w.code) === 'DEP0187'), false);
+        }
+        finally
+        {
+            process.off('warning', onWarning);
+        }
+    });
+
     test('write / read / ls / rmFile / rmDir round-trip', async () =>
     {
         const tmp = path.join(os.tmpdir(), `fmeld-crud-${Date.now()}`);
