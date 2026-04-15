@@ -41,8 +41,12 @@ fmeld -s file:///tmp clean --before "1 day ago" --clean-all
   - [Google Cloud Storage](#google-cloud-storage)
   - [Google Drive](#google-drive)
   - [Dropbox](#dropbox)
+  - [WebDAV](#webdav)
+  - [Azure Blob Storage](#azure-blob-storage)
+  - [OneDrive](#onedrive)
   - [Windows Network Shares (SMB/CIFS)](#windows-network-shares-smbcifs)
   - [Box](#box)
+- [Alternatives](#alternatives)
 
 &nbsp;
 
@@ -824,6 +828,47 @@ Tests cover `toHuman`, `promiseWhile`/`promiseWhileBatch`, `parseParams`, `getCo
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+## Alternatives
+
+| Project | Language / Runtime | Type | Backends | License | Maturity |
+|---|---|---|---|---|---|
+| **[rclone](https://github.com/rclone/rclone)** | Go (static binary) | CLI + HTTP API | ~70+ | MIT | Very high — 10+ years, widely deployed |
+| **[Cyberduck / duck](https://github.com/iterate-ch/cyberduck)** | Java | GUI + CLI | ~30 | GPL v3 | High — 20+ years |
+| **[lftp](https://github.com/lavv17/lftp)** | C++ | CLI | ~10 | GPL v3 | High — 25+ years |
+| **[Flysystem](https://github.com/thephpleague/flysystem)** | PHP | Library | ~15 (via adapters) | MIT | High — 10+ years |
+| **[Apache Commons VFS](https://commons.apache.org/proper/commons-vfs/)** | Java | Library | ~15 | Apache 2.0 | High — 20+ years |
+| **fmeld** | Node.js | CLI + Library | 13 | MIT | Early-stage |
+
+&nbsp;
+
+### rclone
+
+rclone is the most widely used tool in this category. It supports more backends than any other project listed here and has a large community, extensive documentation, and years of production use. It ships as a single static binary with no runtime dependency. Choose rclone when you need the broadest backend coverage, are working in a polyglot or shell-scripting environment, or need a tool you can drop onto any machine without installing a runtime.
+
+### Cyberduck / duck
+
+Cyberduck is primarily a desktop GUI application for macOS and Windows; `duck` is its companion CLI. It covers a wide range of cloud and server backends and is well-suited to interactive use. The GUI provides visual browsing, bookmarks, and drag-and-drop transfers. Choose Cyberduck if your primary workflow is interactive file management rather than scripted or automated transfers, or if your team prefers a GUI tool.
+
+### lftp
+
+lftp is a mature, Unix-native command-line client focused on FTP, FTPS, SFTP, HTTP, and HTTPS. It supports parallel transfers, mirroring, complex scripting via its built-in command language, and resumable downloads. It does not cover cloud object storage (S3, GCS, etc.). Choose lftp when your transfers are FTP/SFTP-centric, you need fine-grained control over connection behaviour, or you require a lightweight dependency on traditional Unix systems.
+
+### Flysystem
+
+Flysystem is a PHP filesystem abstraction library. It provides a uniform API across local, FTP, SFTP, S3, Azure, GCS, and other storage backends via community adapters. It is a library only — there is no CLI. Choose Flysystem when building PHP applications that need to read and write files across multiple storage providers without coupling your code to a specific backend.
+
+### Apache Commons VFS
+
+Apache Commons VFS is a Java library that exposes a virtual filesystem API over FTP, SFTP, HTTP, HTTPS, SMB, local, and compressed archives. It is tightly integrated with the Java ecosystem and is often used inside larger Apache projects. There is no CLI. Choose Commons VFS when building Java applications that need a standard, well-tested abstraction for accessing remote filesystems, particularly in environments that already use Apache libraries.
+
+### fmeld
+
+fmeld is a Node.js package that exposes both a CLI and a programmatic library API. It covers common cloud and server backends, installs optional backends on demand, and is designed to be embedded directly in Node.js applications. Choose fmeld when you are building a Node.js application that needs to transfer or sync files across multiple storage backends from within the same process, without shelling out to an external binary.
+
+&nbsp;
+
+---
 
 ## Links
 
