@@ -23,6 +23,7 @@ const HAS_WEBDAV = pkgAvailable('webdav');
 const HAS_AZBLOB = pkgAvailable('@azure/storage-blob');
 const HAS_MSAL   = pkgAvailable('@azure/msal-node');
 const HAS_SMB2   = pkgAvailable('@marsaud/smb2');
+const HAS_BOX    = pkgAvailable('box-node-sdk');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -244,8 +245,9 @@ describe('getConnection', () =>
     const cases = [
         { url: 'fake:///3.5',             key: 'fakeClient',   connected: true  },
         { url: 'file:///tmp/test-fmeld',  key: 'fileClient',   connected: true  },
-        { url: 'ftp://user:pass@host/path',  key: 'ftpClient',  connected: false },
-        { url: 'sftp://user:pass@host/path', key: 'sftpClient', connected: false },
+        { url: 'ftp://user:pass@host/path',   key: 'ftpClient',  connected: false },
+        { url: 'ftps://user:pass@host/path',  key: 'ftpClient',  connected: false },
+        { url: 'sftp://user:pass@host/path',  key: 'sftpClient', connected: false },
         ...(HAS_S3 ? [
             { url: 's3://bucket/path',    key: 's3Client',     connected: false },
         ] : []),
@@ -263,6 +265,8 @@ describe('getConnection', () =>
             { url: 'cifs://user:pass@server/share/sub', key: 'smbClient', connected: false },
         ] : []),
     ];
+    // Box requires a real credential file so it is excluded from the routing table above,
+    // but it IS wired into getConnection — verified by the "every scheme" test below.
 
     for (const { url, key, connected } of cases)
     {
@@ -318,6 +322,7 @@ describe('getConnection', () =>
         {
             'sftp:'     : 'sftp://user:pass@host/path',
             'ftp:'      : 'ftp://user:pass@host/path',
+            'ftps:'     : 'ftps://user:pass@host/path',
             'webdav:'   : 'webdav://host/path',
             'webdavs:'  : 'webdavs://host/path',
             'smb:'      : 'smb://user:pass@host/share',
@@ -331,6 +336,7 @@ describe('getConnection', () =>
             'azblob:'   : 'azblob://mycontainer/path',
             'abs:'      : 'abs://mycontainer/path',
             'onedrive:' : 'onedrive://Documents',
+            'box:'      : 'box:///my-folder',
         };
 
         for (const b of fmeld.setup.BACKENDS)
@@ -439,6 +445,24 @@ describe('ftpClient', () =>
     {
         const c = fmeld.getConnection('ftp://user:pass@host:2121/path', null, {verbose: false});
         assert.ok(c.getPrefix().includes('2121'));
+    });
+
+    test('ftps:// scheme produces ftps:// prefix', () =>
+    {
+        const c = fmeld.getConnection('ftps://user:pass@host/path', null, {verbose: false});
+        assert.ok(c.getPrefix().startsWith('ftps://'));
+    });
+
+    test('ftps:// defaults to port 21 (explicit TLS)', () =>
+    {
+        const c = fmeld.getConnection('ftps://user:pass@host/path', null, {verbose: false});
+        assert.ok(c.getPrefix().includes(':21'));
+    });
+
+    test('ftps:// routes to ftpClient', () =>
+    {
+        const c = fmeld.getConnection('ftps://user:pass@host/path', null, {verbose: false});
+        assert.ok(c instanceof fmeld.ftpClient);
     });
 
     test('exposes standard interface', () =>
@@ -746,6 +770,124 @@ describe('smbClient', { skip: !HAS_SMB2 ? '@marsaud/smb2 package not installed' 
         const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
         for (const m of METHODS)
             assert.equal(typeof c[m], 'function', `missing: ${m}`);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// boxClient — offline interface tests
+// ---------------------------------------------------------------------------
+
+describe('boxClient', { skip: !HAS_BOX ? 'box-node-sdk package not installed' : false }, () =>
+{
+    test('exported as constructor', () =>
+    {
+        assert.equal(typeof fmeld.boxClient, 'function');
+    });
+
+    test('throws when no credential file is provided', () =>
+    {
+        assert.throws(
+            () => fmeld.getConnection('box:///my-folder', null, {}),
+            /Credentials not provided/
+        );
+    });
+
+    test('throws when credential file is missing', () =>
+    {
+        assert.throws(
+            () => new fmeld.boxClient(
+                { path: '/my-folder', cred: '/nonexistent/box-creds.json' },
+                { verbose: false }
+            ),
+            /Credentials not provided/
+        );
+    });
+
+    test('throws when credential file is invalid JSON', () =>
+    {
+        const tmp      = require('os').tmpdir();
+        const credFile = path.join(tmp, `fmeld-box-bad-${Date.now()}.json`);
+        fs.writeFileSync(credFile, 'not json');
+        try
+        {
+            assert.throws(
+                () => new fmeld.boxClient({ path: '/', cred: credFile }, { verbose: false }),
+                /Invalid credentials file/
+            );
+        }
+        finally { fs.unlinkSync(credFile); }
+    });
+
+    test('constructs without throwing when given a valid stub credential', () =>
+    {
+        const tmp      = require('os').tmpdir();
+        const credFile = path.join(tmp, `fmeld-box-cred-${Date.now()}.json`);
+        fs.writeFileSync(credFile, JSON.stringify({ token: 'dev-token-stub' }));
+        try
+        {
+            assert.doesNotThrow(() =>
+                new fmeld.boxClient({ path: '/', cred: credFile }, { verbose: false })
+            );
+        }
+        finally { fs.unlinkSync(credFile); }
+    });
+
+    test('isConnected false before connect', () =>
+    {
+        const tmp      = require('os').tmpdir();
+        const credFile = path.join(tmp, `fmeld-box-cred2-${Date.now()}.json`);
+        fs.writeFileSync(credFile, JSON.stringify({ token: 'dev-token-stub' }));
+        try
+        {
+            const c = new fmeld.boxClient({ path: '/', cred: credFile }, { verbose: false });
+            assert.equal(c.isConnected(), false);
+        }
+        finally { fs.unlinkSync(credFile); }
+    });
+
+    test('getPrefix starts with box://', () =>
+    {
+        const tmp      = require('os').tmpdir();
+        const credFile = path.join(tmp, `fmeld-box-cred3-${Date.now()}.json`);
+        fs.writeFileSync(credFile, JSON.stringify({ token: 'dev-token-stub' }));
+        try
+        {
+            const c = new fmeld.boxClient({ path: '/docs', cred: credFile }, { verbose: false });
+            assert.ok(c.getPrefix().startsWith('box://'));
+            assert.ok(c.getPrefix('/some/path').includes('some/path'));
+        }
+        finally { fs.unlinkSync(credFile); }
+    });
+
+    test('makePath returns string containing sub-path', () =>
+    {
+        const tmp      = require('os').tmpdir();
+        const credFile = path.join(tmp, `fmeld-box-cred4-${Date.now()}.json`);
+        fs.writeFileSync(credFile, JSON.stringify({ token: 'dev-token-stub' }));
+        try
+        {
+            const c = new fmeld.boxClient({ path: '/docs', cred: credFile }, { verbose: false });
+            assert.equal(typeof c.makePath('sub'), 'string');
+            assert.ok(c.makePath('sub').includes('sub'));
+        }
+        finally { fs.unlinkSync(credFile); }
+    });
+
+    test('exposes standard interface', () =>
+    {
+        const METHODS = ['connect', 'close', 'ls', 'mkDir', 'rmFile', 'rmDir',
+                         'createReadStream', 'createWriteStream', 'makePath',
+                         'getPrefix', 'isConnected'];
+        const tmp      = require('os').tmpdir();
+        const credFile = path.join(tmp, `fmeld-box-cred5-${Date.now()}.json`);
+        fs.writeFileSync(credFile, JSON.stringify({ token: 'dev-token-stub' }));
+        try
+        {
+            const c = new fmeld.boxClient({ path: '/', cred: credFile }, { verbose: false });
+            for (const m of METHODS)
+                assert.equal(typeof c[m], 'function', `missing: ${m}`);
+        }
+        finally { fs.unlinkSync(credFile); }
     });
 });
 
@@ -1325,7 +1467,7 @@ describe('fmeld exports', () =>
     const constructors = [
         'fakeClient', 'fileClient', 'ftpClient', 'sftpClient',
         'gcsClient', 'gdriveClient', 'dropboxClient', 's3Client',
-        'webdavClient', 'azblobClient', 'onedriveClient', 'smbClient',
+        'webdavClient', 'azblobClient', 'onedriveClient', 'smbClient', 'boxClient',
     ];
     const configFns = [
         'promiseWhile', 'promiseDoWhile', 'promiseWhileBatch',

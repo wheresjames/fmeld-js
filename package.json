@@ -20,6 +20,7 @@
     "@azure/storage-blob": "^12.0.0",
     "@google-cloud/storage": "^7.0.0",
     "@marsaud/smb2": "^0.18.0",
+    "box-node-sdk": "^3.0.0",
     "dropbox-v2-api": "^2.4.53",
     "googleapis": "^171.0.0",
     "webdav": "^4.11.0"
@@ -31,6 +32,7 @@
     "@azure/storage-blob":   { "optional": true },
     "@google-cloud/storage": { "optional": true },
     "@marsaud/smb2":         { "optional": true },
+    "box-node-sdk":          { "optional": true },
     "dropbox-v2-api":        { "optional": true },
     "googleapis":            { "optional": true },
     "webdav":                { "optional": true }

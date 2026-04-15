@@ -1,7 +1,7 @@
 
 # fmeld
 
-Move and sync files between local drives, FTP, SFTP, Google Cloud Storage, Google Drive, Dropbox, Amazon S3, Windows network shares, and more — from one command line tool or Node.js library.
+Move and sync files between local drives, FTP, FTPS, SFTP, Google Cloud Storage, Google Drive, Dropbox, Amazon S3, Box, Windows network shares, and more — from one command line tool or Node.js library.
 
 ```bash
 # Copy a local folder up to an FTP server
@@ -42,6 +42,7 @@ fmeld -s file:///tmp clean --before "1 day ago" --clean-all
   - [Google Drive](#google-drive)
   - [Dropbox](#dropbox)
   - [Windows Network Shares (SMB/CIFS)](#windows-network-shares-smbcifs)
+  - [Box](#box)
 
 &nbsp;
 
@@ -84,6 +85,7 @@ If you try to use a backend whose package isn't installed, fmeld will ask whethe
 |---|---|---|
 | Local filesystem | `file://` | Standard local paths |
 | FTP | `ftp://` | Active and passive mode — installed by default |
+| FTPS | `ftps://` | FTP over TLS (explicit) — installed by default |
 | SFTP | `sftp://` | SSH key or password auth — installed by default |
 | Google Cloud Storage | `gs://` or `gcs://` | Service account JSON |
 | Google Drive | `gdrive://` | OAuth2, token cached after first login |
@@ -93,6 +95,7 @@ If you try to use a backend whose package isn't installed, fmeld will ask whethe
 | Azure Blob Storage | `azure://` or `azblob://` | Connection string or account key JSON |
 | OneDrive | `onedrive://` | OAuth2, token cached after first login |
 | Windows Network Share | `smb://` or `cifs://` | SMB2/CIFS — NAS, Windows shares, Samba |
+| Box | `box://` | Box.com cloud storage, JWT app auth or developer token |
 
 &nbsp;
 
@@ -109,6 +112,7 @@ scheme://[user[:password]@]host[:port]/path[?key=value&...]
 ```
 file:///home/user/documents
 ftp://alice:s3cr3t@ftp.example.com:21/uploads
+ftps://alice:s3cr3t@ftp.example.com/uploads
 sftp://alice@sftp.example.com:22/backups
 gs://my-bucket/some/prefix
 gdrive://My Drive/project-files
@@ -122,6 +126,7 @@ onedrive://Documents/project-files
 smb://user:pass@server/sharename
 smb://DOMAIN;user:pass@server/sharename/path/to/dir
 cifs://user:pass@nas.local/backups/archive
+box:///My Box Folder/subfolder
 ```
 
 Query string parameters are passed through as extra options to the backend driver.
@@ -306,6 +311,9 @@ npm install -g @azure/msal-node
 
 # Windows Network Shares (SMB/CIFS)
 npm install -g @marsaud/smb2
+
+# Box.com
+npm install -g box-node-sdk
 ```
 
 &nbsp;
@@ -492,6 +500,7 @@ fmeld.webdavClient(args, opts)
 fmeld.azblobClient(args, opts)
 fmeld.onedriveClient(args, opts)
 fmeld.smbClient(args, opts)
+fmeld.boxClient(args, opts)
 
 // Backend registry and optional-dependency helpers
 fmeld.setup.BACKENDS               // Array of backend descriptors (key, label, pkgs, size, schemes)
@@ -761,6 +770,40 @@ fmeld -s smb://alice:s3cr3t@nas.local:4450/share ls
 
 &nbsp;
 
+---
+
+### Box
+
+fmeld connects to Box.com using the `box-node-sdk` package and supports two credential modes:
+
+**Option 1 — JWT app config** (recommended for production)
+
+1. Go to the [Box Developer Console](https://app.box.com/developers/console) and create a new app with **Server Authentication (JWT)**.
+2. Generate an RSA key pair and download the app config JSON.
+3. Approve the app in your Box Admin Console.
+
+```bash
+fmeld -S ./box-app-config.json -s box:///My Folder ls
+```
+
+**Option 2 — Developer token** (quick testing only — expires after 60 minutes)
+
+```json
+{
+    "client_id":     "your-client-id",
+    "client_secret": "your-client-secret",
+    "token":         "your-developer-token"
+}
+```
+
+```bash
+fmeld -S ./box-dev-token.json -s box:///My Folder ls
+fmeld -S ./box-dev-token.json -s file:///home/user/docs -d box:///Documents sync -Ur
+```
+
+The URL path is the folder tree within Box. The root maps to the top of the authenticated account.
+
+&nbsp;
 
 ---
 
