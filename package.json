@@ -5,6 +5,10 @@
   "bin": {
     "fmeld": "bin/fmeld.js"
   },
+  "scripts": {
+    "smoketest": "node run-smoketests.js",
+    "smoketest:cleanup": "node run-smoketests.js --cleanup"
+  },
   "dependencies": {
     "chrono-node": "^2.4.2",
     "ftp": "^0.3.10",
