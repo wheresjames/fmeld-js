@@ -511,6 +511,7 @@ function main()
         throw(`Source location not specified`);
 
     let retry = _p.retry;
+    let exitCode = 0;
     fmeld.promiseWhile(() => 0 != retry && 0 < _p.cmds.length, () =>
     {
         return new Promise((resolve, reject) =>
@@ -551,6 +552,7 @@ function main()
                                 {
                                     Log(`Required package not installed — ${e.message || String(e)}`);
                                     closeAll(_p);
+                                    exitCode = 1;
                                     resolve(true); // give up on this command
                                 }
                             });
@@ -560,13 +562,17 @@ function main()
                     closeAll(_p);
 
                     if (0 >= _p.cmds.length)
+                    {   exitCode = 1;
                         return resolve(true);
+                    }
 
                     if (0 < retry)
                         retry--;
 
                     if (!retry)
+                    {   exitCode = 1;
                         return resolve(true);
+                    }
                     else
                     {   Log(`Retrying, retry count : ${(0 <= retry) ? retry : 'Infinite'}`);
                         setTimeout(()=>{ resolve(true); }, 3000);
@@ -581,8 +587,9 @@ function main()
         else if (_p.verbose)
             Log('Done');
         closeAll(_p);
+        process.exit(exitCode);
     })
-    .catch((e)=> { Log(_p.verbose ? e : String(e)); });
+    .catch((e)=> { Log(_p.verbose ? e : String(e)); process.exit(1); });
 
 }
 

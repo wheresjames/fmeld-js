@@ -27,9 +27,14 @@ function stripAnsi(str) {
 
 // Reduce a fmeld command line to a short human label
 function describeCmd(cmd) {
-    if (cmd.includes('-r ls'))             return 'ls';
-    if (cmd.includes('-s file://'))        return cmd.includes('-U') ? 'upload (sync)' : 'upload';
-    if (cmd.includes('-d file://'))        return 'download';
+    const c = cmd.trimEnd();
+    if (c.endsWith(' ls'))     return 'ls';
+    if (c.endsWith(' rm'))     return 'rm';
+    if (c.endsWith(' unlink')) return 'unlink';
+    if (c.includes('-s file://')) return c.includes('-U') ? 'sync upload' : 'upload';
+    if (c.includes('-d file://')) return 'download';
+    if (c.endsWith(' sync'))   return 'sync';
+    if (c.endsWith(' cp'))     return 'cross-backend copy';
     return 'run';
 }
 
@@ -132,6 +137,12 @@ async function main() {
             currentBackend = backendMatch[1];
             backendStart   = Date.now();
             console.log(`  ${currentBackend}`);
+            return;
+        }
+
+        // Sub-sections within a backend test (unlink, rm, sync delta, cross-backend)
+        if (/^== (unlink|rm|sync delta|Cross-backend):/.test(content)) {
+            console.log(`    ${content.replace(/^== /, '')}`);
             return;
         }
 

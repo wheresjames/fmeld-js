@@ -10,13 +10,15 @@ const { S3Client, CreateBucketCommand, HeadBucketCommand, PutObjectCommand } = r
 const { BlobServiceClient } = require('@azure/storage-blob');
 
 const ROOT = '/app';
-const FIXTURES = path.join(ROOT, 'docker/live-test/fixtures/share');
-const TMP = process.env.FMELD_LIVE_TMP || '/tmp/fmeld-live';
-const RUN_ID = process.env.FMELD_LIVE_RUN_ID || `run-${Date.now()}`;
-const CREDS = path.join(TMP, 'creds');
-const DOWNLOADS = path.join(TMP, 'downloads');
+const FIXTURES   = path.join(ROOT, 'docker/live-test/fixtures/share');
+const TMP        = process.env.FMELD_LIVE_TMP || '/tmp/fmeld-live';
+const RUN_ID     = process.env.FMELD_LIVE_RUN_ID || `run-${Date.now()}`;
+const CREDS      = path.join(TMP, 'creds');
+const DOWNLOADS  = path.join(TMP, 'downloads');
 const ROUNDTRIPS = path.join(TMP, 'roundtrips');
 const UPLOAD_SRC = path.join(TMP, 'upload-src');
+const SYNC_SRC_V1 = path.join(TMP, 'sync-src-v1');
+const SYNC_SRC_V2 = path.join(TMP, 'sync-src-v2');
 
 const AZURITE_CONNECTION_STRING = [
     'DefaultEndpointsProtocol=http',
@@ -33,6 +35,15 @@ function log(msg)
 function fileUrl(p)
 {
     return `file://${p}`;
+}
+
+/** Append a sub-path to a URL, preserving any query string */
+function appendUrlPath(url, subPath)
+{
+    const qIdx = url.indexOf('?');
+    if (qIdx >= 0)
+        return `${url.slice(0, qIdx)}/${subPath}${url.slice(qIdx)}`;
+    return `${url}/${subPath}`;
 }
 
 function clearDir(dir)
@@ -170,105 +181,203 @@ function writeUploadSource()
     fs.writeFileSync(path.join(UPLOAD_SRC, 'nested', 'echo.txt'), 'nested upload smoke\n');
 }
 
-function assertSeedDownloaded(dir)
+function writeSyncSources()
 {
-    assert.ok(fs.existsSync(path.join(dir, 'root.txt')));
-    assert.ok(fs.existsSync(path.join(dir, 'nested', 'child.txt')));
-    assert.ok(fs.existsSync(path.join(dir, 'nested', 'deeper', 'value.json')));
+    // v1: initial two files
+    clearDir(SYNC_SRC_V1);
+    fs.writeFileSync(path.join(SYNC_SRC_V1, 'sync-a.txt'), 'sync file a\n');
+    fs.writeFileSync(path.join(SYNC_SRC_V1, 'sync-b.txt'), 'sync file b\n');
+
+    // v2: keeps sync-a.txt (unchanged — should not re-upload), adds sync-c.txt
+    // sync-b.txt is absent; sync -U does not delete from destination, so it persists
+    clearDir(SYNC_SRC_V2);
+    fs.writeFileSync(path.join(SYNC_SRC_V2, 'sync-a.txt'), 'sync file a\n');
+    fs.writeFileSync(path.join(SYNC_SRC_V2, 'sync-c.txt'), 'sync file c\n');
 }
 
+/** Assert that the seeded fixture tree was downloaded correctly, including content */
+function assertSeedDownloaded(dir)
+{
+    const files = [
+        'root.txt',
+        path.join('nested', 'child.txt'),
+        path.join('nested', 'deeper', 'value.json'),
+        'has space.txt',
+    ];
+    for (const rel of files)
+    {
+        const downloaded = path.join(dir, rel);
+        assert.ok(fs.existsSync(downloaded), `Missing file after download: ${rel}`);
+        const actual   = fs.readFileSync(downloaded);
+        const expected = fs.readFileSync(path.join(FIXTURES, rel));
+        assert.ok(actual.equals(expected), `Content mismatch after download: ${rel}`);
+    }
+}
+
+/** Assert that the upload source survived the round-trip, including content */
 function assertUploadRoundTrip(dir)
 {
-    assert.ok(fs.existsSync(path.join(dir, 'upload.txt')));
-    assert.ok(fs.existsSync(path.join(dir, 'nested', 'echo.txt')));
+    const files = ['upload.txt', path.join('nested', 'echo.txt')];
+    for (const rel of files)
+    {
+        const roundtripped = path.join(dir, rel);
+        assert.ok(fs.existsSync(roundtripped), `Missing file after round-trip: ${rel}`);
+        const actual   = fs.readFileSync(roundtripped);
+        const expected = fs.readFileSync(path.join(UPLOAD_SRC, rel));
+        assert.ok(actual.equals(expected), `Content mismatch after round-trip: ${rel}`);
+    }
 }
 
 async function main()
 {
     clearDir(TMP);
-    fs.mkdirSync(DOWNLOADS, {recursive: true});
+    fs.mkdirSync(DOWNLOADS,  {recursive: true});
     fs.mkdirSync(ROUNDTRIPS, {recursive: true});
 
     log('Waiting for live-test services');
     await Promise.all([
-        waitForPort('ftp', 2121),
-        waitForPort('webdav', 8080),
-        waitForPort('sftp', 22),
-        waitForPort('smb', 445),
-        waitForPort('minio', 9000),
+        waitForPort('ftp',     2121),
+        waitForPort('webdav',  8080),
+        waitForPort('sftp',    22),
+        waitForPort('smb',     445),
+        waitForPort('minio',   9000),
         waitForPort('azurite', 10000)
     ]);
 
     writeCredFiles();
     writeUploadSource();
+    writeSyncSources();
     await seedS3();
     await seedAzurite();
 
     const cases = [
         {
-            name: 'ftp',
-            readUrl: 'ftp://demo:password@ftp:2121/',
+            name:     'ftp',
+            readUrl:  'ftp://demo:password@ftp:2121/',
             writeUrl: `ftp://demo:password@ftp:2121/uploads/${RUN_ID}/ftp`,
-            writeMode: 'cp'
+            syncUrl:  `ftp://demo:password@ftp:2121/uploads/${RUN_ID}/ftp-sync`,
         },
         {
-            name: 'webdav',
-            readUrl: 'webdav://demo:password@webdav:8080/',
+            name:     'webdav',
+            readUrl:  'webdav://demo:password@webdav:8080/',
             writeUrl: `webdav://demo:password@webdav:8080/uploads/${RUN_ID}/webdav`,
-            writeMode: 'cp'
+            syncUrl:  `webdav://demo:password@webdav:8080/uploads/${RUN_ID}/webdav-sync`,
         },
         {
-            name: 'sftp',
-            readUrl: 'sftp://demo:password@sftp/home/demo/data',
+            name:     'sftp',
+            readUrl:  'sftp://demo:password@sftp/home/demo/data',
             writeUrl: `sftp://demo:password@sftp/home/demo/data/uploads/${RUN_ID}/sftp`,
-            writeMode: 'sync'
+            syncUrl:  `sftp://demo:password@sftp/home/demo/data/uploads/${RUN_ID}/sftp-sync`,
         },
         {
-            name: 'smb',
-            readUrl: 'smb://demo:password@smb/share',
+            name:     'smb',
+            readUrl:  'smb://demo:password@smb/share',
             writeUrl: `smb://demo:password@smb/share/uploads/${RUN_ID}/smb`,
-            writeMode: 'cp'
+            syncUrl:  `smb://demo:password@smb/share/uploads/${RUN_ID}/smb-sync`,
         },
         {
-            name: 's3',
-            readUrl: 's3://fmeld-live/?endpoint=http://minio:9000&region=us-east-1&force-path-style=true',
+            name:     's3',
+            readUrl:  's3://fmeld-live/?endpoint=http://minio:9000&region=us-east-1&force-path-style=true',
             writeUrl: `s3://fmeld-live/uploads/${RUN_ID}/s3?endpoint=http://minio:9000&region=us-east-1&force-path-style=true`,
-            cred: path.join(CREDS, 's3.json'),
-            writeMode: 'sync'
+            syncUrl:  `s3://fmeld-live/uploads/${RUN_ID}/s3-sync?endpoint=http://minio:9000&region=us-east-1&force-path-style=true`,
+            cred:     path.join(CREDS, 's3.json'),
         },
         {
-            name: 'azblob',
-            readUrl: 'azblob://fmeld-live/',
+            name:     'azblob',
+            readUrl:  'azblob://fmeld-live/',
             writeUrl: `azblob://fmeld-live/uploads/${RUN_ID}/azblob`,
-            cred: path.join(CREDS, 'azblob.json'),
-            writeMode: 'cp'
+            syncUrl:  `azblob://fmeld-live/uploads/${RUN_ID}/azblob-sync`,
+            cred:     path.join(CREDS, 'azblob.json'),
         }
     ];
 
-    for (const testCase of cases)
+    // ── per-backend tests ───────────────────────────────────────────────────
+
+    for (const tc of cases)
     {
-        log(`Smoke testing ${testCase.name}`);
+        log(`Smoke testing ${tc.name}`);
 
-        const sourceCredArgs = testCase.cred ? ['-S', testCase.cred] : [];
-        const destCredArgs = testCase.cred ? ['-E', testCase.cred] : [];
+        const srcCred  = tc.cred ? ['-S', tc.cred] : [];
+        const dstCred  = tc.cred ? ['-E', tc.cred] : [];
 
-        runFmeld([...sourceCredArgs, '-s', testCase.readUrl, '-r', 'ls']);
+        // ls
+        runFmeld([...srcCred, '-s', tc.readUrl, '-r', 'ls']);
 
-        const downloadDir = path.join(DOWNLOADS, testCase.name);
+        // download seed and verify content
+        const downloadDir = path.join(DOWNLOADS, tc.name);
         clearDir(downloadDir);
-        runFmeld([...sourceCredArgs, '-s', testCase.readUrl, '-d', fileUrl(downloadDir), '-r', 'cp']);
+        runFmeld([...srcCred, '-s', tc.readUrl, '-d', fileUrl(downloadDir), '-r', 'cp']);
         assertSeedDownloaded(downloadDir);
 
-        if ('sync' === testCase.writeMode)
-            runFmeld([...destCredArgs, '-s', fileUrl(UPLOAD_SRC), '-d', testCase.writeUrl, '-r', '-U', 'sync']);
-        else
-            runFmeld([...destCredArgs, '-s', fileUrl(UPLOAD_SRC), '-d', testCase.writeUrl, '-r', 'cp']);
+        // upload via sync (exercises sync on every backend)
+        runFmeld([...dstCred, '-s', fileUrl(UPLOAD_SRC), '-d', tc.writeUrl, '-r', '-U', 'sync']);
 
-        const roundTripDir = path.join(ROUNDTRIPS, testCase.name);
+        // round-trip download and verify content
+        const roundTripDir = path.join(ROUNDTRIPS, tc.name);
         clearDir(roundTripDir);
-        runFmeld([...sourceCredArgs, '-s', testCase.writeUrl, '-d', fileUrl(roundTripDir), '-r', 'cp']);
+        runFmeld([...srcCred, '-s', tc.writeUrl, '-d', fileUrl(roundTripDir), '-r', 'cp']);
         assertUploadRoundTrip(roundTripDir);
+
+        // ── unlink: delete one file and verify it is gone ───────────────────
+
+        log(`unlink: ${tc.name}`);
+
+        runFmeld([...dstCred, '-s', appendUrlPath(tc.writeUrl, 'upload.txt'), '-r', 'unlink']);
+
+        const postUnlinkDir = path.join(TMP, 'post-unlink', tc.name);
+        clearDir(postUnlinkDir);
+        runFmeld([...srcCred, '-s', tc.writeUrl, '-d', fileUrl(postUnlinkDir), '-r', 'cp']);
+        assert.ok(
+            !fs.existsSync(path.join(postUnlinkDir, 'upload.txt')),
+            `${tc.name}: upload.txt should be absent after unlink`
+        );
+        assert.ok(
+            fs.existsSync(path.join(postUnlinkDir, 'nested', 'echo.txt')),
+            `${tc.name}: nested/echo.txt should remain after unlink`
+        );
+
+        // ── rm: delete the uploaded directory entirely ──────────────────────
+
+        log(`rm: ${tc.name}`);
+
+        runFmeld([...dstCred, '-s', tc.writeUrl, '-r', 'rm']);
+
+        // ── sync delta: verify new files appear after a second sync pass ────
+
+        log(`sync delta: ${tc.name}`);
+
+        // initial sync
+        runFmeld([...dstCred, '-s', fileUrl(SYNC_SRC_V1), '-d', tc.syncUrl, '-r', '-U', 'sync']);
+
+        // second sync: sync-a.txt unchanged (should be skipped), sync-c.txt added
+        runFmeld([...dstCred, '-s', fileUrl(SYNC_SRC_V2), '-d', tc.syncUrl, '-r', '-U', 'sync']);
+
+        const syncDeltaDir = path.join(TMP, 'sync-delta', tc.name);
+        clearDir(syncDeltaDir);
+        runFmeld([...srcCred, '-s', tc.syncUrl, '-d', fileUrl(syncDeltaDir), '-r', 'cp']);
+
+        // sync-a and sync-b were in v1; sync -U does not delete, so both persist
+        assert.ok(fs.existsSync(path.join(syncDeltaDir, 'sync-a.txt')), `${tc.name}: sync-a.txt missing`);
+        assert.ok(fs.existsSync(path.join(syncDeltaDir, 'sync-b.txt')), `${tc.name}: sync-b.txt missing`);
+        // sync-c was added in v2 and should have been uploaded
+        assert.ok(fs.existsSync(path.join(syncDeltaDir, 'sync-c.txt')), `${tc.name}: sync-c.txt missing after sync delta`);
+        assert.ok(
+            fs.readFileSync(path.join(syncDeltaDir, 'sync-c.txt')).equals(fs.readFileSync(path.join(SYNC_SRC_V2, 'sync-c.txt'))),
+            `${tc.name}: sync-c.txt content mismatch`
+        );
     }
+
+    // ── cross-backend: ftp → webdav (no local intermediate) ────────────────
+
+    log('Cross-backend: ftp → webdav');
+
+    const crossUrl = `webdav://demo:password@webdav:8080/uploads/${RUN_ID}/cross`;
+    runFmeld(['-s', 'ftp://demo:password@ftp:2121/', '-d', crossUrl, '-r', 'cp']);
+
+    const crossDir = path.join(DOWNLOADS, 'cross');
+    clearDir(crossDir);
+    runFmeld(['-s', crossUrl, '-d', fileUrl(crossDir), '-r', 'cp']);
+    assertSeedDownloaded(crossDir);
 
     log('All live protocol checks passed');
 }
