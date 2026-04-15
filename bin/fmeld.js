@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const fmeld = require('fmeld');
+const fmeld = require('..');
 const chrono = require('chrono-node');
 
 /// Masks password in a URL string for safe logging
@@ -249,6 +249,173 @@ function closeAll(_p)
     }
 }
 
+/**
+ * Interactive checkbox UI for selecting and installing backends.
+ * Requires a TTY; falls back to a plain text list in non-interactive environments.
+ */
+function runSetup()
+{
+    const setup = fmeld.setup;
+
+    if (!process.stdin.isTTY || !process.stdout.isTTY)
+    {
+        console.log('\nfmeld backends\n');
+        setup.BACKENDS.forEach(b =>
+        {
+            const ok  = b.pkgs.every(setup.pkgAvailable);
+            const tag = ok ? '\x1b[32minstalled\x1b[0m' : b.pkgs.join(' ') + ` (${b.size})`;
+            console.log(`  ${b.key.padEnd(10)} ${b.label.padEnd(26)} ${tag}`);
+        });
+        console.log('\nTo install a backend: npm install <package>');
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) =>
+    {
+        const items = setup.BACKENDS.map(b => ({
+            ...b,
+            installed: b.pkgs.every(setup.pkgAvailable),
+            selected : b.pkgs.every(setup.pkgAvailable)
+        }));
+
+        let cursor = 0;
+
+        const bold  = '\x1b[1m';
+        const dim   = '\x1b[2m';
+        const green = '\x1b[32m';
+        const cyan  = '\x1b[36m';
+        const reset = '\x1b[0m';
+
+        function render()
+        {
+            process.stdout.write('\x1b[2J\x1b[H');
+            process.stdout.write(`${bold}  fmeld backend setup${reset}\n\n`);
+            process.stdout.write(
+                `  ${dim}↑↓ navigate   SPACE toggle   a select-all   n select-none   ENTER install   q quit${reset}\n\n`
+            );
+
+            items.forEach((item, i) =>
+            {
+                const hi     = i === cursor;
+                const check  = item.selected ? `${green}[x]${reset}` : `[ ]`;
+                const label  = item.label.padEnd(26);
+                const pkgs   = item.pkgs.join(' ');
+                const status = item.installed
+                    ? `${dim}(installed)${reset}`
+                    : `${dim}(${item.size})${reset}`;
+                const prefix = hi ? `${cyan}>${reset} ` : '  ';
+                const name   = hi ? `${bold}${label}${reset}` : label;
+                process.stdout.write(`${prefix}${check} ${name} ${pkgs} ${status}\n`);
+            });
+
+            process.stdout.write('\n');
+        }
+
+        render();
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+        process.stdin.setEncoding('utf8');
+
+        function cleanup()
+        {
+            try { process.stdin.setRawMode(false); } catch(e) {}
+            process.stdin.pause();
+        }
+
+        process.stdin.on('data', function handler(key)
+        {
+            if (key === '\x03' || key === 'q')
+            {
+                process.stdin.removeListener('data', handler);
+                cleanup();
+                process.stdout.write('\n  Cancelled.\n');
+                return resolve();
+            }
+
+            if      (key === '\x1b[A') { cursor = (cursor - 1 + items.length) % items.length; render(); }
+            else if (key === '\x1b[B') { cursor = (cursor + 1) % items.length;                render(); }
+            else if (key === ' ')      { items[cursor].selected = !items[cursor].selected;     render(); }
+            else if (key === 'a')      { items.forEach(i => i.selected = true);               render(); }
+            else if (key === 'n')      { items.forEach(i => i.selected = false);              render(); }
+            else if (key === '\r' || key === '\n')
+            {
+                process.stdin.removeListener('data', handler);
+                cleanup();
+
+                const toInstall = items.filter(i => i.selected && !i.installed);
+                if (!toInstall.length)
+                {
+                    process.stdout.write('\n  Nothing new to install.\n\n');
+                    return resolve();
+                }
+
+                // Deduplicate in case two backends share a package
+                const pkgs = [...new Set(toInstall.flatMap(i => i.pkgs))];
+                process.stdout.write(`\n  Installing: ${pkgs.join(' ')}\n\n`);
+
+                try
+                {
+                    setup.installPackages(pkgs);
+                    process.stdout.write('\n  Done! The selected backends are ready to use.\n\n');
+                    resolve();
+                }
+                catch(e)
+                {
+                    process.stderr.write(`\n  Install failed: ${String(e)}\n`);
+                    reject(e);
+                }
+            }
+        });
+    });
+}
+
+/**
+ * Prompt the user to install a missing backend package (TTY only).
+ * Resolves true if the package was installed, false if the user declined
+ * or if no TTY is available.
+ *
+ * @param {string}   pkg     - npm package name
+ * @param {string[]} allPkgs - all packages needed by this backend
+ * @param {string}   hint    - URL scheme or descriptive hint
+ */
+function promptInstall(pkg, allPkgs, hint)
+{
+    return new Promise((resolve) =>
+    {
+        if (!process.stdin.isTTY || !process.stdout.isTTY)
+            return resolve(false);
+
+        const pkgList = [...new Set(allPkgs || [pkg])];
+        const rl = require('readline').createInterface({
+            input : process.stdin,
+            output: process.stdout
+        });
+
+        rl.question(
+            `\n  '${pkg}' is required for ${hint || pkg}\n  Install ${pkgList.join(' ')} now? [y/N] `,
+            (answer) =>
+            {
+                rl.close();
+                if (answer.trim().toLowerCase() !== 'y' && answer.trim().toLowerCase() !== 'yes')
+                    return resolve(false);
+
+                process.stdout.write(`  Installing ${pkgList.join(' ')}...\n`);
+                try
+                {
+                    fmeld.setup.installPackages(pkgList);
+                    process.stdout.write(`  Installed. Retrying...\n\n`);
+                    resolve(true);
+                }
+                catch(e)
+                {
+                    process.stderr.write(`  Install failed: ${String(e)}\n`);
+                    resolve(false);
+                }
+            }
+        );
+    });
+}
+
 /// Main application function
 function main()
 {
@@ -336,6 +503,10 @@ function main()
     for (let v of _p['*'].slice(2))
         _p.cmds.push(v);
 
+    // 'setup' runs before any source/dest is required
+    if (_p.cmds.includes('setup'))
+        return runSetup().then(() => process.exit(0)).catch(e => { Log(String(e)); process.exit(1); });
+
     if (!_p.source)
         throw(`Source location not specified`);
 
@@ -344,9 +515,13 @@ function main()
     {
         return new Promise((resolve, reject) =>
         {
-            // Execute command
-            nextCommand(_p)
-                .then((r) =>
+            // Wrap nextCommand so synchronous throws become rejections,
+            // allowing the .catch below to handle them uniformly.
+            let cmd;
+            try { cmd = nextCommand(_p); }
+            catch(e) { cmd = Promise.reject(e); }
+
+            cmd.then((r) =>
                 {
                     // Reset retry count
                     retry = _p.retry;
@@ -356,8 +531,31 @@ function main()
 
                     resolve(true);
                 })
-                .catch((e)=>
+                .catch((e) =>
                 {
+                    // First-use install prompt for missing backend packages
+                    if (e && e.code === 'BACKEND_NOT_INSTALLED' && process.stdin.isTTY)
+                    {
+                        return promptInstall(e.pkg, e.allPkgs, e.hint)
+                            .then(installed =>
+                            {
+                                if (installed)
+                                {
+                                    // Reset connections so they are re-created with the new package
+                                    closeAll(_p);
+                                    delete _p.src;
+                                    delete _p.dst;
+                                    resolve(true); // retry without touching the retry counter
+                                }
+                                else
+                                {
+                                    Log(`Required package not installed — ${e.message || String(e)}`);
+                                    closeAll(_p);
+                                    resolve(true); // give up on this command
+                                }
+                            });
+                    }
+
                     Log(_p.verbose ? e : String(e));
                     closeAll(_p);
 

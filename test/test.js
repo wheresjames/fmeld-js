@@ -7,7 +7,7 @@ const path = require('path');
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 
-const fmeld = require('fmeld');
+const fmeld = require('..');
 
 // ---------------------------------------------------------------------------
 // Optional-dependency availability checks
@@ -15,6 +15,10 @@ const fmeld = require('fmeld');
 
 function pkgAvailable(name) { try { require(name); return true; } catch { return false; } }
 
+// Use fmeld's own pkgAvailable so we test the real implementation
+const { pkgAvailable: setupPkgAvailable } = require('..').setup;
+
+const HAS_S3     = pkgAvailable('@aws-sdk/client-s3') && pkgAvailable('@aws-sdk/lib-storage');
 const HAS_WEBDAV = pkgAvailable('webdav');
 const HAS_AZBLOB = pkgAvailable('@azure/storage-blob');
 const HAS_MSAL   = pkgAvailable('@azure/msal-node');
@@ -240,7 +244,11 @@ describe('getConnection', () =>
     const cases = [
         { url: 'fake:///3.5',             key: 'fakeClient',   connected: true  },
         { url: 'file:///tmp/test-fmeld',  key: 'fileClient',   connected: true  },
-        { url: 's3://bucket/path',        key: 's3Client',     connected: false },
+        { url: 'ftp://user:pass@host/path',  key: 'ftpClient',  connected: false },
+        { url: 'sftp://user:pass@host/path', key: 'sftpClient', connected: false },
+        ...(HAS_S3 ? [
+            { url: 's3://bucket/path',    key: 's3Client',     connected: false },
+        ] : []),
         ...(HAS_WEBDAV ? [
             { url: 'webdav://myhost/path',    key: 'webdavClient', connected: false },
             { url: 'webdavs://myhost/path',   key: 'webdavClient', connected: false },
@@ -282,13 +290,80 @@ describe('getConnection', () =>
     {
         assert.throws(() => fmeld.getConnection('onedrive://Documents', null, {}));
     });
+
+    test('missing optional package throws BACKEND_NOT_INSTALLED, not a raw module error', () =>
+    {
+        // @marsaud/smb2 is in optionalDependencies and not currently installed
+        // — the typed error lets callers offer a helpful install prompt
+        try
+        {
+            fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
+        }
+        catch(e)
+        {
+            assert.equal(e.code, 'BACKEND_NOT_INSTALLED',
+                `expected BACKEND_NOT_INSTALLED, got: ${String(e)}`);
+            assert.equal(typeof e.pkg,  'string', 'e.pkg should be a string');
+            assert.equal(typeof e.hint, 'string', 'e.hint should be a string');
+            assert.ok(Array.isArray(e.allPkgs),   'e.allPkgs should be an array');
+            assert.ok(e.allPkgs.includes(e.pkg),  'e.allPkgs should include e.pkg');
+        }
+    });
+
+    test('every scheme in the BACKENDS registry is handled by getConnection', () =>
+    {
+        // Guarantees that adding a backend to the registry without wiring it into
+        // getConnection's switch is caught immediately.
+        const schemeUrls =
+        {
+            'sftp:'     : 'sftp://user:pass@host/path',
+            'ftp:'      : 'ftp://user:pass@host/path',
+            'webdav:'   : 'webdav://host/path',
+            'webdavs:'  : 'webdavs://host/path',
+            'smb:'      : 'smb://user:pass@host/share',
+            'cifs:'     : 'cifs://user:pass@host/share',
+            'gs:'       : 'gs://mybucket/path',
+            'gcs:'      : 'gcs://mybucket/path',
+            'gdrive:'   : 'gdrive://docs/sub',
+            'dropbox:'  : 'dropbox:///uploads',
+            's3:'       : 's3://mybucket/path',
+            'azure:'    : 'azure://mycontainer/path',
+            'azblob:'   : 'azblob://mycontainer/path',
+            'abs:'      : 'abs://mycontainer/path',
+            'onedrive:' : 'onedrive://Documents',
+        };
+
+        for (const b of fmeld.setup.BACKENDS)
+        {
+            for (const scheme of b.schemes)
+            {
+                const url = schemeUrls[scheme];
+                assert.ok(url, `no test URL defined for scheme ${scheme}`);
+
+                try
+                {
+                    fmeld.getConnection(url, null, {verbose: false});
+                    // If it didn't throw, the package is installed — that's fine
+                }
+                catch(e)
+                {
+                    const msg = String(e.message || e);
+                    assert.ok(
+                        !msg.toLowerCase().includes('unknown protocol'),
+                        `${scheme} fell through to "Unknown protocol" — ` +
+                        `add it to getConnection's switch statement`
+                    );
+                }
+            }
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------
 // S3 client interface
 // ---------------------------------------------------------------------------
 
-describe('s3Client', () =>
+describe('s3Client', { skip: !HAS_S3 ? '@aws-sdk/client-s3 package not installed' : false }, () =>
 {
     test('exported as constructor', () =>
     {
@@ -326,6 +401,102 @@ describe('s3Client', () =>
         assert.equal(c.isConnected(), true);
         assert.equal(await c.close(), true);
         assert.equal(c.isConnected(), false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// ftpClient — offline interface tests (ftp is a default dependency)
+// ---------------------------------------------------------------------------
+
+describe('ftpClient', () =>
+{
+    test('exported as constructor', () =>
+    {
+        assert.equal(typeof fmeld.ftpClient, 'function');
+    });
+
+    test('isConnected false before connect', () =>
+    {
+        const c = fmeld.getConnection('ftp://user:pass@host/path', null, {verbose: false});
+        assert.equal(c.isConnected(), false);
+    });
+
+    test('makePath returns string containing sub-path', () =>
+    {
+        const c = fmeld.getConnection('ftp://user:pass@host/data', null, {verbose: false});
+        assert.equal(typeof c.makePath('sub'), 'string');
+        assert.ok(c.makePath('sub').includes('sub'));
+    });
+
+    test('getPrefix starts with ftp://', () =>
+    {
+        const c = fmeld.getConnection('ftp://user:pass@host/path', null, {verbose: false});
+        assert.ok(c.getPrefix().startsWith('ftp://'));
+        assert.ok(c.getPrefix('/some/path').includes('some/path'));
+    });
+
+    test('port is reflected in prefix', () =>
+    {
+        const c = fmeld.getConnection('ftp://user:pass@host:2121/path', null, {verbose: false});
+        assert.ok(c.getPrefix().includes('2121'));
+    });
+
+    test('exposes standard interface', () =>
+    {
+        const METHODS = ['connect', 'close', 'ls', 'mkDir', 'rmFile', 'rmDir',
+                         'createReadStream', 'createWriteStream', 'makePath',
+                         'getPrefix', 'isConnected'];
+        const c = fmeld.getConnection('ftp://user:pass@host/path', null, {verbose: false});
+        for (const m of METHODS)
+            assert.equal(typeof c[m], 'function', `missing: ${m}`);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// sftpClient — offline interface tests (ssh2 is a default dependency)
+// ---------------------------------------------------------------------------
+
+describe('sftpClient', () =>
+{
+    test('exported as constructor', () =>
+    {
+        assert.equal(typeof fmeld.sftpClient, 'function');
+    });
+
+    test('isConnected false before connect', () =>
+    {
+        const c = fmeld.getConnection('sftp://user:pass@host/path', null, {verbose: false});
+        assert.equal(c.isConnected(), false);
+    });
+
+    test('makePath returns string containing sub-path', () =>
+    {
+        const c = fmeld.getConnection('sftp://user:pass@host/data', null, {verbose: false});
+        assert.equal(typeof c.makePath('sub'), 'string');
+        assert.ok(c.makePath('sub').includes('sub'));
+    });
+
+    test('getPrefix starts with sftp://', () =>
+    {
+        const c = fmeld.getConnection('sftp://user:pass@host/path', null, {verbose: false});
+        assert.ok(c.getPrefix().startsWith('sftp://'));
+        assert.ok(c.getPrefix('/some/path').includes('some/path'));
+    });
+
+    test('port is reflected in prefix', () =>
+    {
+        const c = fmeld.getConnection('sftp://user:pass@host:2222/path', null, {verbose: false});
+        assert.ok(c.getPrefix().includes('2222'));
+    });
+
+    test('exposes standard interface', () =>
+    {
+        const METHODS = ['connect', 'close', 'ls', 'mkDir', 'rmFile', 'rmDir',
+                         'createReadStream', 'createWriteStream', 'makePath',
+                         'getPrefix', 'isConnected'];
+        const c = fmeld.getConnection('sftp://user:pass@host/path', null, {verbose: false});
+        for (const m of METHODS)
+            assert.equal(typeof c[m], 'function', `missing: ${m}`);
     });
 });
 
@@ -1026,6 +1197,122 @@ describe('loadConfig', () =>
 });
 
 // ---------------------------------------------------------------------------
+// setup module
+// ---------------------------------------------------------------------------
+
+describe('fmeld.setup', () =>
+{
+    const setup = fmeld.setup;
+
+    test('BACKENDS is a non-empty array', () =>
+    {
+        assert.ok(Array.isArray(setup.BACKENDS));
+        assert.ok(setup.BACKENDS.length > 0);
+    });
+
+    test('every backend entry has required fields', () =>
+    {
+        for (const b of setup.BACKENDS)
+        {
+            assert.equal(typeof b.key,         'string',  `${b.key}: key`);
+            assert.equal(typeof b.label,       'string',  `${b.key}: label`);
+            assert.ok(Array.isArray(b.pkgs),              `${b.key}: pkgs`);
+            assert.ok(b.pkgs.length > 0,                  `${b.key}: pkgs non-empty`);
+            assert.equal(typeof b.size,        'string',  `${b.key}: size`);
+            assert.ok(Array.isArray(b.schemes),           `${b.key}: schemes`);
+            assert.ok(b.schemes.length > 0,               `${b.key}: schemes non-empty`);
+        }
+    });
+
+    test('pkgAvailable returns true for a built-in module', () =>
+    {
+        assert.equal(setupPkgAvailable('fs'), true);
+        assert.equal(setupPkgAvailable('path'), true);
+    });
+
+    test('pkgAvailable returns false for a non-existent package', () =>
+    {
+        assert.equal(setupPkgAvailable('__fmeld_nonexistent_pkg__'), false);
+    });
+
+    test('requireBackend returns the module when the package is installed', () =>
+    {
+        // 'path' is always available — use it as a canary
+        const result = setup.requireBackend('path', 'test://');
+        assert.ok(result);
+        assert.equal(typeof result.join, 'function');
+    });
+
+    test('requireBackend throws BACKEND_NOT_INSTALLED for a missing package', () =>
+    {
+        try
+        {
+            setup.requireBackend('__fmeld_nonexistent_pkg__', 'test://');
+            assert.fail('should have thrown');
+        }
+        catch(e)
+        {
+            assert.equal(e.code, 'BACKEND_NOT_INSTALLED');
+            assert.equal(typeof e.pkg,     'string');
+            assert.equal(typeof e.hint,    'string');
+            assert.ok(Array.isArray(e.allPkgs));
+        }
+    });
+
+    test('getBackendByPkg finds a backend by its primary package', () =>
+    {
+        // ssh2 is always in the registry regardless of whether it's installed
+        const b = setup.getBackendByPkg('ssh2');
+        assert.ok(b);
+        assert.equal(b.key, 'sftp');
+    });
+
+    test('getBackendByPkg returns null for an unknown package', () =>
+    {
+        assert.equal(setup.getBackendByPkg('__unknown_pkg__'), null);
+    });
+
+    test('every BACKENDS entry is findable by each of its packages', () =>
+    {
+        for (const b of setup.BACKENDS)
+            for (const pkg of b.pkgs)
+            {
+                const found = setup.getBackendByPkg(pkg);
+                assert.ok(found, `${pkg} not findable`);
+                assert.equal(found.key, b.key);
+            }
+    });
+
+    test('pkgAvailable returns true for a core dependency that is always installed', () =>
+    {
+        // 'sparen' is in dependencies (not optional) so it is always present
+        assert.equal(setup.pkgAvailable('sparen'), true);
+    });
+
+    test('pkgAvailable returns false for a package that is not installed', () =>
+    {
+        assert.equal(setup.pkgAvailable('__fmeld_nonexistent_pkg__'), false);
+    });
+
+    test('backend keys are unique across the registry', () =>
+    {
+        const keys = setup.BACKENDS.map(b => b.key);
+        assert.equal(new Set(keys).size, keys.length, 'duplicate key in BACKENDS');
+    });
+
+    test('schemes are unique across the registry', () =>
+    {
+        const schemes = setup.BACKENDS.flatMap(b => b.schemes);
+        assert.equal(new Set(schemes).size, schemes.length, 'duplicate scheme in BACKENDS');
+    });
+
+    test('installPackages is exported as a function', () =>
+    {
+        assert.equal(typeof setup.installPackages, 'function');
+    });
+});
+
+// ---------------------------------------------------------------------------
 // exports completeness
 // ---------------------------------------------------------------------------
 
@@ -1051,8 +1338,10 @@ describe('fmeld exports', () =>
     for (const name of constructors)
         test(`fmeld.${name} is a constructor`, () => assert.equal(typeof fmeld[name], 'function'));
 
-    test('fmeld.__info__ is present', () => assert.ok(fmeld.__info__));
+    test('fmeld.__info__ is present',   () => assert.ok(fmeld.__info__));
     test('fmeld.__config__ is present', () => assert.ok(fmeld.__config__));
+    test('fmeld.setup is present',      () => assert.ok(fmeld.setup));
+    test('fmeld.setup.BACKENDS is present', () => assert.ok(Array.isArray(fmeld.setup.BACKENDS)));
 
     for (const name of configFns)
         test(`fmeld.__config__.${name} is a function`,

@@ -28,6 +28,7 @@ fmeld -s file:///tmp clean --before "1 day ago" --clean-all
 - [Commands](#commands)
 - [Options reference](#options-reference)
 - [Examples](#examples)
+  - [Installing backends](#installing-backends)
   - [List files](#list-files)
   - [Copy files](#copy-files)
   - [Sync files](#sync-files)
@@ -58,6 +59,21 @@ Or install locally into your project:
 npm install fmeld
 ```
 
+FTP and SFTP are included out of the box. Cloud and network backends (S3, GCS, Google Drive, Dropbox, Azure, OneDrive, WebDAV, SMB) are **optional** — run the interactive setup wizard to choose which you need:
+
+```bash
+fmeld setup
+```
+
+This presents a checkbox menu. Use arrow keys to navigate, space to toggle, and Enter to install. Alternatively, install backends individually:
+
+```bash
+npm install -g @aws-sdk/client-s3 @aws-sdk/lib-storage  # S3
+npm install -g @google-cloud/storage         # Google Cloud Storage
+```
+
+If you try to use a backend whose package isn't installed, fmeld will ask whether to install it on the spot.
+
 &nbsp;
 
 ---
@@ -67,8 +83,8 @@ npm install fmeld
 | Backend | URL scheme | Notes |
 |---|---|---|
 | Local filesystem | `file://` | Standard local paths |
-| FTP | `ftp://` | Active and passive mode |
-| SFTP | `sftp://` | SSH key or password auth |
+| FTP | `ftp://` | Active and passive mode — installed by default |
+| SFTP | `sftp://` | SSH key or password auth — installed by default |
 | Google Cloud Storage | `gs://` or `gcs://` | Service account JSON |
 | Google Drive | `gdrive://` | OAuth2, token cached after first login |
 | Dropbox | `dropbox://` | OAuth2, token cached after first login |
@@ -156,6 +172,7 @@ For cloud services (Google Drive, Dropbox, GCS), `-S` / `-E` should point to the
 | `rm` | Remove a directory at the source path |
 | `unlink` | Remove a single file at the source path |
 | `clean` | Delete files matching age / size / name filters |
+| `setup` | Interactively install optional backend packages |
 
 Multiple commands can be chained in a single invocation and will run in sequence.
 
@@ -234,6 +251,66 @@ fmeld [options] [ls|cp|sync|md|rm|unlink|clean]
 ---
 
 ## Examples
+
+### Installing backends
+
+Backend packages are optional. The `setup` command presents an interactive checklist — already-installed packages are pre-ticked, missing ones can be selected and installed in one step:
+
+```bash
+fmeld setup
+```
+
+In a non-interactive environment (CI, Docker) the same command prints the current status of every backend without prompting:
+
+```bash
+fmeld setup
+# fmeld backends
+#
+#   sftp       SFTP (SSH)                  installed (default)
+#   ftp        FTP                         installed (default)
+#   webdav     WebDAV                      webdav (2 MB)
+#   smb        Windows Network Share       @marsaud/smb2 (1 MB)
+#   ...
+```
+
+If you try to use a backend whose package is not installed and a terminal is attached, fmeld prompts automatically:
+
+```
+  '@marsaud/smb2' is required for smb://
+  Install @marsaud/smb2 now? [y/N]
+```
+
+To install a specific backend manually:
+
+```bash
+# Amazon S3
+npm install -g @aws-sdk/client-s3 @aws-sdk/lib-storage
+
+# Google Cloud Storage
+npm install -g @google-cloud/storage
+
+# Google Drive
+npm install -g googleapis
+
+# Dropbox
+npm install -g dropbox-v2-api
+
+# WebDAV
+npm install -g webdav
+
+# Azure Blob Storage
+npm install -g @azure/storage-blob
+
+# OneDrive
+npm install -g @azure/msal-node
+
+# Windows Network Shares (SMB/CIFS)
+npm install -g @marsaud/smb2
+```
+
+&nbsp;
+
+---
 
 ### List files
 
@@ -415,6 +492,13 @@ fmeld.webdavClient(args, opts)
 fmeld.azblobClient(args, opts)
 fmeld.onedriveClient(args, opts)
 fmeld.smbClient(args, opts)
+
+// Backend registry and optional-dependency helpers
+fmeld.setup.BACKENDS               // Array of backend descriptors (key, label, pkgs, size, schemes)
+fmeld.setup.pkgAvailable(name)     // Returns true if an npm package is installed
+fmeld.setup.requireBackend(pkg, hint)  // require() with a typed BACKEND_NOT_INSTALLED error
+fmeld.setup.getBackendByPkg(pkg)   // Look up a backend descriptor by package name
+fmeld.setup.installPackages(pkgs)  // Install packages into fmeld's node_modules
 ```
 
 All client objects expose the same interface:
