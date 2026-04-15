@@ -72,6 +72,9 @@ npm install fmeld
 | Google Drive | `gdrive://` | OAuth2, token cached after first login |
 | Dropbox | `dropbox://` | OAuth2, token cached after first login |
 | Amazon S3 | `s3://` | IAM credentials JSON or environment variables |
+| WebDAV | `webdav://` or `webdavs://` | Nextcloud, ownCloud, NAS, and any WebDAV server |
+| Azure Blob Storage | `azure://` or `azblob://` | Connection string or account key JSON |
+| OneDrive | `onedrive://` | OAuth2, token cached after first login |
 
 &nbsp;
 
@@ -94,6 +97,10 @@ gdrive://My Drive/project-files
 dropbox:///camera-uploads
 s3://my-bucket/some/prefix
 s3://my-bucket/path?region=eu-west-1
+webdav://alice:pass@nas.local/remote.php/dav/files/alice/documents
+webdavs://alice:pass@nas.local:8443/remote.php/dav/files/alice/photos
+azure://my-container/some/prefix
+onedrive://Documents/project-files
 ```
 
 Query string parameters are passed through as extra options to the backend driver.
@@ -391,7 +398,7 @@ fmeld.stdoutProgress(args, opts)                // Built-in progress reporter
 fmeld.toHuman(bytes)                            // Format bytes as "1.23 MB" etc.
 
 // Low-level client constructors (if you want to instantiate directly)
-fmeld.fakeClient(args, opts)    // In-memory fake tree — useful for testing
+fmeld.fakeClient(args, opts)       // In-memory fake tree — useful for testing
 fmeld.fileClient(args, opts)
 fmeld.ftpClient(args, opts)
 fmeld.sftpClient(args, opts)
@@ -399,6 +406,9 @@ fmeld.gcsClient(args, opts)
 fmeld.gdriveClient(args, opts)
 fmeld.dropboxClient(args, opts)
 fmeld.s3Client(args, opts)
+fmeld.webdavClient(args, opts)
+fmeld.azblobClient(args, opts)
+fmeld.onedriveClient(args, opts)
 ```
 
 All client objects expose the same interface:
@@ -518,6 +528,102 @@ fmeld -S ./gdrive-oauth-client.json -u 1 -s gdrive://My\ Drive/backups ls
 
 ```bash
 fmeld -E ./dropbox-creds.json -d dropbox:///uploads ls
+```
+
+&nbsp;
+
+---
+
+### WebDAV
+
+Pass credentials directly in the URL or via a plain-text password file (`-S` / `-E`):
+
+```bash
+# HTTP WebDAV with user/pass in URL
+fmeld -s 'webdav://alice:s3cr3t@nas.local/remote.php/dav/files/alice/docs' ls
+
+# HTTPS WebDAV using a password file
+fmeld -S ./webdav-pass.txt -s webdavs://alice@nextcloud.example.com/remote.php/dav/files/alice/docs ls
+
+# Sync local to Nextcloud
+fmeld -S ./webdav-pass.txt \
+      -s file:///home/alice/documents \
+      -d webdavs://alice@nextcloud.example.com/remote.php/dav/files/alice/documents \
+      sync -Ur
+```
+
+The password file should contain only the password on a single line.
+
+&nbsp;
+
+---
+
+### Azure Blob Storage
+
+Create a JSON credentials file — pick one of these formats:
+
+**Option 1 — Connection string** (easiest, found in the Azure Portal under your storage account → Access keys):
+```json
+{
+    "connection_string": "DefaultEndpointsProtocol=https;AccountName=mystorageaccount;AccountKey=base64key==;EndpointSuffix=core.windows.net"
+}
+```
+
+**Option 2 — Account name + key:**
+```json
+{
+    "account_name": "mystorageaccount",
+    "account_key":  "base64encodedkey=="
+}
+```
+
+**Option 3 — SAS token:**
+```json
+{
+    "account_name": "mystorageaccount",
+    "sas_token":    "sv=2021-06-08&ss=b&srt=co&sp=rwdlacuptfx&..."
+}
+```
+
+Without a credentials file, fmeld reads `AZURE_STORAGE_CONNECTION_STRING` from the environment.
+
+The URL hostname is the **container name**; the path is an optional blob prefix:
+
+```bash
+fmeld -S ./azure-creds.json -s azure://my-container/backups ls
+fmeld -S ./azure-creds.json -s file:///home/user/data -d azure://my-container/data cp -r
+fmeld -S ./azure-creds.json -s azure://my-container/data -d file:///home/user/data sync -Dr
+```
+
+&nbsp;
+
+---
+
+### OneDrive
+
+1. Go to [Azure App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps) and create a new registration.
+2. Set the redirect URI to `http://localhost:19227` (Web type, or your chosen `--authport`).
+3. Under **Certificates & secrets**, create a new client secret and copy the value.
+4. Under **API permissions**, add **Microsoft Graph → Files.ReadWrite** (Delegated), then grant admin consent.
+5. Create a JSON credentials file:
+```json
+{
+    "client_id":     "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "client_secret": "your-client-secret-value",
+    "tenant_id":     "common"
+}
+```
+
+On the first run, fmeld will print an authorization URL. After you log in and grant access, the token is cached alongside the credentials file (`.token.json`) for future runs.
+
+```bash
+fmeld -S ./onedrive-creds.json -s onedrive://Documents/backups ls
+fmeld -S ./onedrive-creds.json -s file:///home/user/docs -d onedrive://Documents/docs sync -Ur
+```
+
+To force re-authentication:
+```bash
+fmeld -S ./onedrive-creds.json -u 1 -s onedrive://Documents/backups ls
 ```
 
 &nbsp;

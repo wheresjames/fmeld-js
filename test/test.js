@@ -10,6 +10,16 @@ const assert = require('node:assert/strict');
 const fmeld = require('fmeld');
 
 // ---------------------------------------------------------------------------
+// Optional-dependency availability checks
+// ---------------------------------------------------------------------------
+
+function pkgAvailable(name) { try { require(name); return true; } catch { return false; } }
+
+const HAS_WEBDAV = pkgAvailable('webdav');
+const HAS_AZBLOB = pkgAvailable('@azure/storage-blob');
+const HAS_MSAL   = pkgAvailable('@azure/msal-node');
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -227,9 +237,18 @@ describe('getConnection', () =>
     ];
 
     const cases = [
-        { url: 'fake:///3.5',            key: 'fakeClient', connected: true  },
-        { url: 'file:///tmp/test-fmeld', key: 'fileClient', connected: true  },
-        { url: 's3://bucket/path',       key: 's3Client',   connected: false },
+        { url: 'fake:///3.5',             key: 'fakeClient',   connected: true  },
+        { url: 'file:///tmp/test-fmeld',  key: 'fileClient',   connected: true  },
+        { url: 's3://bucket/path',        key: 's3Client',     connected: false },
+        ...(HAS_WEBDAV ? [
+            { url: 'webdav://myhost/path',    key: 'webdavClient', connected: false },
+            { url: 'webdavs://myhost/path',   key: 'webdavClient', connected: false },
+        ] : []),
+        ...(HAS_AZBLOB ? [
+            { url: 'azure://mycontainer/sub', key: 'azblobClient', connected: false },
+            { url: 'azblob://mycontainer/sub',key: 'azblobClient', connected: false },
+            { url: 'abs://mycontainer/sub',   key: 'azblobClient', connected: false },
+        ] : []),
     ];
 
     for (const { url, key, connected } of cases)
@@ -252,6 +271,11 @@ describe('getConnection', () =>
     test('unknown protocol throws', () =>
     {
         assert.throws(() => fmeld.getConnection('bogus://host/path', null, {}));
+    });
+
+    test('onedrive:// without credentials throws', () =>
+    {
+        assert.throws(() => fmeld.getConnection('onedrive://Documents', null, {}));
     });
 });
 
@@ -297,6 +321,241 @@ describe('s3Client', () =>
         assert.equal(c.isConnected(), true);
         assert.equal(await c.close(), true);
         assert.equal(c.isConnected(), false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// webdavClient — offline interface tests
+// ---------------------------------------------------------------------------
+
+describe('webdavClient', { skip: !HAS_WEBDAV ? 'webdav package not installed' : false }, () =>
+{
+    test('exported as constructor', () =>
+    {
+        assert.equal(typeof fmeld.webdavClient, 'function');
+    });
+
+    test('isConnected false before connect', () =>
+    {
+        const c = fmeld.getConnection('webdav://myhost/path', null, {verbose: false});
+        assert.equal(c.isConnected(), false);
+    });
+
+    test('makePath returns string', () =>
+    {
+        const c = fmeld.getConnection('webdav://myhost/path', null, {verbose: false});
+        assert.equal(typeof c.makePath('sub'), 'string');
+        assert.ok(c.makePath('sub').includes('sub'));
+    });
+
+    test('getPrefix starts with webdav://', () =>
+    {
+        const c = fmeld.getConnection('webdav://myhost/path', null, {verbose: false});
+        assert.ok(c.getPrefix().startsWith('webdav://'));
+        assert.ok(c.getPrefix('/some/path').includes('some/path'));
+    });
+
+    test('webdavs:// scheme produces webdavs:// prefix', () =>
+    {
+        const c = fmeld.getConnection('webdavs://myhost/path', null, {verbose: false});
+        assert.ok(c.getPrefix().startsWith('webdavs://'));
+    });
+
+    test('connect creates client and isConnected becomes true', async () =>
+    {
+        // createClient() is non-blocking (no network) — connect resolves without a server
+        const c = fmeld.getConnection('webdav://myhost/path', null, {verbose: false});
+        assert.equal(await c.connect(), true);
+        assert.equal(c.isConnected(), true);
+    });
+
+    test('close after connect returns true and isConnected becomes false', async () =>
+    {
+        const c = fmeld.getConnection('webdav://myhost/path', null, {verbose: false});
+        await c.connect();
+        assert.equal(await c.close(), true);
+        assert.equal(c.isConnected(), false);
+    });
+
+    test('close without prior connect resolves true', async () =>
+    {
+        const c = fmeld.getConnection('webdav://myhost/path', null, {verbose: false});
+        assert.equal(await c.close(), true);
+    });
+
+    test('port is reflected in prefix', () =>
+    {
+        const c = fmeld.getConnection('webdav://myhost:8080/path', null, {verbose: false});
+        assert.ok(c.getPrefix().includes('8080'));
+    });
+
+    test('exposes standard interface', () =>
+    {
+        const METHODS = ['connect', 'close', 'ls', 'mkDir', 'rmFile', 'rmDir',
+                         'createReadStream', 'createWriteStream', 'makePath',
+                         'getPrefix', 'isConnected'];
+        const c = fmeld.getConnection('webdav://myhost/path', null, {verbose: false});
+        for (const m of METHODS)
+            assert.equal(typeof c[m], 'function', `missing: ${m}`);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// azblobClient — offline interface tests
+// ---------------------------------------------------------------------------
+
+describe('azblobClient', { skip: !HAS_AZBLOB ? '@azure/storage-blob package not installed' : false }, () =>
+{
+    test('exported as constructor', () =>
+    {
+        assert.equal(typeof fmeld.azblobClient, 'function');
+    });
+
+    test('isConnected false before connect', () =>
+    {
+        const c = fmeld.getConnection('azure://mycontainer/path', null, {verbose: false});
+        assert.equal(c.isConnected(), false);
+    });
+
+    test('makePath returns string', () =>
+    {
+        const c = fmeld.getConnection('azure://mycontainer/path', null, {verbose: false});
+        assert.equal(typeof c.makePath('sub'), 'string');
+        assert.ok(c.makePath('sub').includes('sub'));
+    });
+
+    test('getPrefix starts with azure://', () =>
+    {
+        const c = fmeld.getConnection('azure://mycontainer/path', null, {verbose: false});
+        assert.ok(c.getPrefix().startsWith('azure://'));
+        assert.ok(c.getPrefix('/some/path').includes('some/path'));
+    });
+
+    test('azblob:// and abs:// also route to azblobClient with azure:// prefix', () =>
+    {
+        for (const scheme of ['azblob', 'abs'])
+        {
+            const c = fmeld.getConnection(`${scheme}://mycontainer/path`, null, {verbose: false});
+            assert.ok(c instanceof fmeld.azblobClient);
+            assert.ok(c.getPrefix().startsWith('azure://'));
+        }
+    });
+
+    test('mkDir resolves true (no-op — no real directories in blob storage)', async () =>
+    {
+        const c = fmeld.getConnection('azure://mycontainer/path', null, {verbose: false});
+        assert.equal(await c.mkDir('/any/path', {recursive: true}), true);
+    });
+
+    test('connect rejects without credentials (no env var set)', async () =>
+    {
+        // Temporarily hide the env var if present
+        const saved = process.env.AZURE_STORAGE_CONNECTION_STRING;
+        delete process.env.AZURE_STORAGE_CONNECTION_STRING;
+        try
+        {
+            const c = fmeld.getConnection('azure://mycontainer/path', null, {verbose: false});
+            await assert.rejects(async () => c.connect());
+        }
+        finally
+        {
+            if (saved !== undefined)
+                process.env.AZURE_STORAGE_CONNECTION_STRING = saved;
+        }
+    });
+
+    test('close without prior connect resolves true', async () =>
+    {
+        const c = fmeld.getConnection('azure://mycontainer/path', null, {verbose: false});
+        assert.equal(await c.close(), true);
+    });
+
+    test('exposes standard interface', () =>
+    {
+        const METHODS = ['connect', 'close', 'ls', 'mkDir', 'rmFile', 'rmDir',
+                         'createReadStream', 'createWriteStream', 'makePath',
+                         'getPrefix', 'isConnected'];
+        const c = fmeld.getConnection('azure://mycontainer/path', null, {verbose: false});
+        for (const m of METHODS)
+            assert.equal(typeof c[m], 'function', `missing: ${m}`);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// onedriveClient — construction and credential-guard tests
+// ---------------------------------------------------------------------------
+
+describe('onedriveClient', { skip: !HAS_MSAL ? '@azure/msal-node package not installed' : false }, () =>
+{
+    test('exported as constructor', () =>
+    {
+        assert.equal(typeof fmeld.onedriveClient, 'function');
+    });
+
+    test('getConnection throws without a credentials file', () =>
+    {
+        assert.throws(
+            () => fmeld.getConnection('onedrive://Documents/backups', null, {}),
+            /Credentials not provided/
+        );
+    });
+
+    test('constructor throws when credential file is missing', () =>
+    {
+        assert.throws(
+            () => new fmeld.onedriveClient(
+                { path: '/Documents', cred: '/nonexistent/creds.json' },
+                { verbose: false }
+            ),
+            /Credentials not provided/
+        );
+    });
+
+    test('constructor throws when credential file lacks client_id', () =>
+    {
+        const tmp = require('os').tmpdir();
+        const credFile = path.join(tmp, `fmeld-od-cred-${Date.now()}.json`);
+        fs.writeFileSync(credFile, JSON.stringify({ client_secret: 'secret' }));
+        try
+        {
+            assert.throws(
+                () => new fmeld.onedriveClient(
+                    { path: '/Documents', cred: credFile },
+                    { verbose: false }
+                ),
+                /client_id missing/
+            );
+        }
+        finally { fs.unlinkSync(credFile); }
+    });
+
+    test('exposes standard interface when constructed with valid credential stub', () =>
+    {
+        const tmp  = require('os').tmpdir();
+        const credFile = path.join(tmp, `fmeld-od-cred2-${Date.now()}.json`);
+        fs.writeFileSync(credFile, JSON.stringify(
+        {   client_id    : 'test-client-id',
+            client_secret: 'test-secret',
+            tenant_id    : 'common'
+        }));
+
+        try
+        {
+            const METHODS = ['connect', 'close', 'ls', 'mkDir', 'rmFile', 'rmDir',
+                             'createReadStream', 'createWriteStream', 'makePath',
+                             'getPrefix', 'isConnected'];
+            const c = new fmeld.onedriveClient(
+                { path: '/Documents', cred: credFile },
+                { verbose: false, authport: 19227 }
+            );
+            for (const m of METHODS)
+                assert.equal(typeof c[m], 'function', `missing: ${m}`);
+
+            assert.equal(c.isConnected(), false);
+            assert.ok(c.getPrefix().startsWith('onedrive://'));
+            assert.ok(c.makePath('sub').includes('sub'));
+        }
+        finally { fs.unlinkSync(credFile); }
     });
 });
 
@@ -682,6 +941,7 @@ describe('fmeld exports', () =>
     const constructors = [
         'fakeClient', 'fileClient', 'ftpClient', 'sftpClient',
         'gcsClient', 'gdriveClient', 'dropboxClient', 's3Client',
+        'webdavClient', 'azblobClient', 'onedriveClient',
     ];
     const configFns = [
         'promiseWhile', 'promiseDoWhile', 'promiseWhileBatch',
