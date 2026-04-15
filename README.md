@@ -1,7 +1,7 @@
 
 # fmeld
 
-Move and sync files between local drives, FTP, SFTP, Google Cloud Storage, Google Drive, Dropbox, and Amazon S3 — from one command line tool or Node.js library.
+Move and sync files between local drives, FTP, SFTP, Google Cloud Storage, Google Drive, Dropbox, Amazon S3, Windows network shares, and more — from one command line tool or Node.js library.
 
 ```bash
 # Copy a local folder up to an FTP server
@@ -40,6 +40,7 @@ fmeld -s file:///tmp clean --before "1 day ago" --clean-all
   - [Google Cloud Storage](#google-cloud-storage)
   - [Google Drive](#google-drive)
   - [Dropbox](#dropbox)
+  - [Windows Network Shares (SMB/CIFS)](#windows-network-shares-smbcifs)
 
 &nbsp;
 
@@ -75,6 +76,7 @@ npm install fmeld
 | WebDAV | `webdav://` or `webdavs://` | Nextcloud, ownCloud, NAS, and any WebDAV server |
 | Azure Blob Storage | `azure://` or `azblob://` | Connection string or account key JSON |
 | OneDrive | `onedrive://` | OAuth2, token cached after first login |
+| Windows Network Share | `smb://` or `cifs://` | SMB2/CIFS — NAS, Windows shares, Samba |
 
 &nbsp;
 
@@ -101,6 +103,9 @@ webdav://alice:pass@nas.local/remote.php/dav/files/alice/documents
 webdavs://alice:pass@nas.local:8443/remote.php/dav/files/alice/photos
 azure://my-container/some/prefix
 onedrive://Documents/project-files
+smb://user:pass@server/sharename
+smb://DOMAIN;user:pass@server/sharename/path/to/dir
+cifs://user:pass@nas.local/backups/archive
 ```
 
 Query string parameters are passed through as extra options to the backend driver.
@@ -409,6 +414,7 @@ fmeld.s3Client(args, opts)
 fmeld.webdavClient(args, opts)
 fmeld.azblobClient(args, opts)
 fmeld.onedriveClient(args, opts)
+fmeld.smbClient(args, opts)
 ```
 
 All client objects expose the same interface:
@@ -624,6 +630,49 @@ fmeld -S ./onedrive-creds.json -s file:///home/user/docs -d onedrive://Documents
 To force re-authentication:
 ```bash
 fmeld -S ./onedrive-creds.json -u 1 -s onedrive://Documents/backups ls
+```
+
+&nbsp;
+
+---
+
+### Windows Network Shares (SMB/CIFS)
+
+fmeld connects to SMB2/CIFS shares (Windows file shares, NAS devices, Samba servers) using the `@marsaud/smb2` package — no native binaries or `smbclient` install required.
+
+**URL format:**
+```
+smb://[domain;]user:pass@server/sharename[/sub/path]
+cifs://[domain;]user:pass@server/sharename[/sub/path]
+```
+
+The first path component after the hostname is always the **share name**. Any remaining path is the subdirectory within the share.
+
+**Examples:**
+```bash
+# List a share
+fmeld -s smb://alice:s3cr3t@nas.local/documents ls
+
+# Sync local → share
+fmeld -s file:///home/alice/docs -d smb://alice:s3cr3t@nas.local/documents sync -Ur
+
+# Include a Windows domain (two equivalent forms)
+fmeld -s 'smb://CORP;alice:s3cr3t@fileserver.corp.local/shared/reports' ls
+fmeld -s 'smb://alice:s3cr3t@fileserver.corp.local/shared/reports?domain=CORP' ls
+
+# Use a password file instead of embedding credentials in the URL
+fmeld -S /run/secrets/smb-pass -s smb://alice@nas.local/backups ls
+
+# Copy from a Windows share to local
+fmeld -s smb://alice:s3cr3t@winserver/myshare/exports \
+      -d file:///home/alice/exports cp -r
+```
+
+The password file (passed with `-S` / `-E`) should contain only the password on a single line.
+
+SMB port 445 is used by default. To use a non-standard port, append it to the hostname:
+```bash
+fmeld -s smb://alice:s3cr3t@nas.local:4450/share ls
 ```
 
 &nbsp;

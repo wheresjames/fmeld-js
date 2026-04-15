@@ -18,6 +18,7 @@ function pkgAvailable(name) { try { require(name); return true; } catch { return
 const HAS_WEBDAV = pkgAvailable('webdav');
 const HAS_AZBLOB = pkgAvailable('@azure/storage-blob');
 const HAS_MSAL   = pkgAvailable('@azure/msal-node');
+const HAS_SMB2   = pkgAvailable('@marsaud/smb2');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -249,6 +250,10 @@ describe('getConnection', () =>
             { url: 'azblob://mycontainer/sub',key: 'azblobClient', connected: false },
             { url: 'abs://mycontainer/sub',   key: 'azblobClient', connected: false },
         ] : []),
+        ...(HAS_SMB2 ? [
+            { url: 'smb://user:pass@server/share',      key: 'smbClient', connected: false },
+            { url: 'cifs://user:pass@server/share/sub', key: 'smbClient', connected: false },
+        ] : []),
     ];
 
     for (const { url, key, connected } of cases)
@@ -476,6 +481,98 @@ describe('azblobClient', { skip: !HAS_AZBLOB ? '@azure/storage-blob package not 
                          'createReadStream', 'createWriteStream', 'makePath',
                          'getPrefix', 'isConnected'];
         const c = fmeld.getConnection('azure://mycontainer/path', null, {verbose: false});
+        for (const m of METHODS)
+            assert.equal(typeof c[m], 'function', `missing: ${m}`);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// smbClient — offline interface tests
+// ---------------------------------------------------------------------------
+
+describe('smbClient', { skip: !HAS_SMB2 ? '@marsaud/smb2 package not installed' : false }, () =>
+{
+    test('exported as constructor', () =>
+    {
+        assert.equal(typeof fmeld.smbClient, 'function');
+    });
+
+    test('throws when no share name in URL', () =>
+    {
+        assert.throws(
+            () => fmeld.getConnection('smb://server/', null, {}),
+            /Share name not provided/
+        );
+    });
+
+    test('isConnected false before connect', () =>
+    {
+        const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
+        assert.equal(c.isConnected(), false);
+    });
+
+    test('makePath returns string containing sub-path', () =>
+    {
+        const c = fmeld.getConnection('smb://user:pass@server/share/sub', null, {verbose: false});
+        assert.equal(typeof c.makePath('child'), 'string');
+        assert.ok(c.makePath('child').includes('child'));
+    });
+
+    test('getPrefix starts with smb://', () =>
+    {
+        const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
+        assert.ok(c.getPrefix().startsWith('smb://'));
+        assert.ok(c.getPrefix('/some/path').includes('some/path'));
+    });
+
+    test('cifs:// scheme routes to smbClient with smb:// prefix', () =>
+    {
+        const c = fmeld.getConnection('cifs://user:pass@server/share', null, {verbose: false});
+        assert.ok(c instanceof fmeld.smbClient);
+        assert.ok(c.getPrefix().startsWith('smb://'));
+    });
+
+    test('connect creates client and isConnected becomes true', async () =>
+    {
+        // SMB2 uses lazy connections — new SMB2({...}) is non-blocking
+        const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
+        assert.equal(await c.connect(), true);
+        assert.equal(c.isConnected(), true);
+    });
+
+    test('close after connect returns true and isConnected becomes false', async () =>
+    {
+        const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
+        await c.connect();
+        assert.equal(await c.close(), true);
+        assert.equal(c.isConnected(), false);
+    });
+
+    test('close without prior connect resolves true', async () =>
+    {
+        const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
+        assert.equal(await c.close(), true);
+    });
+
+    test('port is reflected in prefix', () =>
+    {
+        const c = fmeld.getConnection('smb://user:pass@server:4450/share', null, {verbose: false});
+        assert.ok(c.getPrefix().includes('4450'));
+    });
+
+    test('domain;user syntax is accepted without throwing', () =>
+    {
+        assert.doesNotThrow(() =>
+            fmeld.getConnection('smb://CORP;alice:s3cr3t@fileserver/shared', null, {verbose: false})
+        );
+    });
+
+    test('exposes standard interface', () =>
+    {
+        const METHODS = ['connect', 'close', 'ls', 'mkDir', 'rmFile', 'rmDir',
+                         'createReadStream', 'createWriteStream', 'makePath',
+                         'getPrefix', 'isConnected'];
+        const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
         for (const m of METHODS)
             assert.equal(typeof c[m], 'function', `missing: ${m}`);
     });
@@ -941,7 +1038,7 @@ describe('fmeld exports', () =>
     const constructors = [
         'fakeClient', 'fileClient', 'ftpClient', 'sftpClient',
         'gcsClient', 'gdriveClient', 'dropboxClient', 's3Client',
-        'webdavClient', 'azblobClient', 'onedriveClient',
+        'webdavClient', 'azblobClient', 'onedriveClient', 'smbClient',
     ];
     const configFns = [
         'promiseWhile', 'promiseDoWhile', 'promiseWhileBatch',
