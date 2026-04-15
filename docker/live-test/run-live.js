@@ -299,6 +299,7 @@ async function main()
 
         const srcCred  = tc.cred ? ['-S', tc.cred] : [];
         const dstCred  = tc.cred ? ['-E', tc.cred] : [];
+        const writeSrcCred = tc.cred ? ['-S', tc.cred] : [];
 
         // ls
         runFmeld([...srcCred, '-s', tc.readUrl, '-r', 'ls']);
@@ -322,7 +323,7 @@ async function main()
 
         log(`unlink: ${tc.name}`);
 
-        runFmeld([...dstCred, '-s', appendUrlPath(tc.writeUrl, 'upload.txt'), '-r', 'unlink']);
+        runFmeld([...writeSrcCred, '-s', appendUrlPath(tc.writeUrl, 'upload.txt'), '-r', 'unlink']);
 
         const postUnlinkDir = path.join(TMP, 'post-unlink', tc.name);
         clearDir(postUnlinkDir);
@@ -340,7 +341,7 @@ async function main()
 
         log(`rm: ${tc.name}`);
 
-        runFmeld([...dstCred, '-s', tc.writeUrl, '-r', 'rm']);
+        runFmeld([...writeSrcCred, '-s', tc.writeUrl, '-r', 'rm']);
 
         // ── sync delta: verify new files appear after a second sync pass ────
 
