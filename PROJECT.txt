@@ -1,5 +1,5 @@
 name            fmeld
-version         1.1.0
+version         1.2.0
 description     Sync files between local drives, ftp, sftp, GCS, Google Drive, Dropbox
 company         wheresjames
 author          Robert Umbehant
