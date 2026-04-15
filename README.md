@@ -34,6 +34,7 @@ fmeld -s file:///tmp clean --before "1 day ago" --clean-all
   - [Make / remove directories](#make--remove-directories)
   - [Clean old files](#clean-old-files)
 - [Using as a library](#using-as-a-library)
+- [Testing](#testing)
 - [Setting up cloud credentials](#setting-up-cloud-credentials)
   - [Amazon S3](#amazon-s3)
   - [Google Cloud Storage](#google-cloud-storage)
@@ -390,6 +391,7 @@ fmeld.stdoutProgress(args, opts)                // Built-in progress reporter
 fmeld.toHuman(bytes)                            // Format bytes as "1.23 MB" etc.
 
 // Low-level client constructors (if you want to instantiate directly)
+fmeld.fakeClient(args, opts)    // In-memory fake tree — useful for testing
 fmeld.fileClient(args, opts)
 fmeld.ftpClient(args, opts)
 fmeld.sftpClient(args, opts)
@@ -520,6 +522,20 @@ fmeld -E ./dropbox-creds.json -d dropbox:///uploads ls
 
 &nbsp;
 
+
+---
+
+## Testing
+
+The test suite uses the built-in [`node:test`](https://nodejs.org/api/test.html) runner (Node 18+):
+
+```bash
+node --test test/test.js
+```
+
+Tests cover `toHuman`, `promiseWhile`/`promiseWhileBatch`, `parseParams`, `getConnection` protocol dispatch, all client constructors, `copyDir`, `syncDir`, `cleanDir`, and `loadConfig`. Filesystem tests create and clean up their own temporary directories under `os.tmpdir()`.
+
+&nbsp;
 
 ---
 
