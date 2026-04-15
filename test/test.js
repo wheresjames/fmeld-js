@@ -713,6 +713,13 @@ describe('smbClient', { skip: !HAS_SMB2 ? '@marsaud/smb2 package not installed' 
         assert.ok(c.makePath('child').includes('child'));
     });
 
+    test('root makePath does not duplicate share name', () =>
+    {
+        const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});
+        assert.equal(c.makePath(), '/');
+        assert.equal(c.getPrefix(c.makePath()), 'smb://server/share/');
+    });
+
     test('getPrefix starts with smb://', () =>
     {
         const c = fmeld.getConnection('smb://user:pass@server/share', null, {verbose: false});

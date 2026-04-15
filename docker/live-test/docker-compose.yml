@@ -1,0 +1,81 @@
+services:
+  runner:
+    build:
+      context: ../..
+      dockerfile: docker/live-test/Dockerfile.runner
+    depends_on:
+      ftp:
+        condition: service_healthy
+      webdav:
+        condition: service_healthy
+      sftp:
+        condition: service_healthy
+      smb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+    environment:
+      FMELD_LIVE_TMP: /tmp/fmeld-live
+
+  ftp:
+    build:
+      context: ../..
+      dockerfile: docker/live-test/Dockerfile.ftp
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2121"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  webdav:
+    build:
+      context: ../..
+      dockerfile: docker/live-test/Dockerfile.webdav
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sftp:
+    build:
+      context: ../..
+      dockerfile: docker/live-test/Dockerfile.sftp
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "22"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  smb:
+    build:
+      context: ../..
+      dockerfile: docker/live-test/Dockerfile.smb
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "445"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --location /data --debug /data/debug.log --skipApiVersionCheck
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').createConnection(10000,'localhost').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

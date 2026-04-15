@@ -1,0 +1,10 @@
+FROM rclone/rclone:latest
+
+COPY docker/live-test/fixtures/share/ /seed/
+COPY docker/live-test/webdav-entrypoint.sh /usr/local/bin/webdav-entrypoint.sh
+
+RUN chmod +x /usr/local/bin/webdav-entrypoint.sh
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/webdav-entrypoint.sh"]

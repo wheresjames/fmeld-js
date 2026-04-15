@@ -1,0 +1,20 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssh-server netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -d /home/demo -s /bin/bash demo \
+    && echo 'demo:password' | chpasswd \
+    && mkdir -p /var/run/sshd /home/demo/data \
+    && chown -R demo:demo /home/demo
+
+COPY docker/live-test/fixtures/share/ /seed/
+COPY docker/live-test/sshd_config /etc/ssh/sshd_config
+COPY docker/live-test/sftp-entrypoint.sh /usr/local/bin/sftp-entrypoint.sh
+
+RUN chmod +x /usr/local/bin/sftp-entrypoint.sh
+
+EXPOSE 22
+
+CMD ["/usr/local/bin/sftp-entrypoint.sh"]

@@ -821,6 +821,14 @@ node --test test/test.js
 
 Tests cover `toHuman`, `promiseWhile`/`promiseWhileBatch`, `parseParams`, `getConnection` protocol dispatch, all client constructors, `copyDir`, `syncDir`, `cleanDir`, and `loadConfig`. Filesystem tests create and clean up their own temporary directories under `os.tmpdir()`.
 
+For a Docker-based live smoke test against real protocol servers, run:
+
+```bash
+docker compose -f docker/live-test/docker-compose.yml up --build --abort-on-container-exit --exit-code-from runner
+```
+
+That stack exercises `ftp`, `sftp`, `webdav`, `smb`, `s3` (via MinIO), and `azblob` (via Azurite). Details live in `docker/live-test/README.md`.
+
 &nbsp;
 
 ---
