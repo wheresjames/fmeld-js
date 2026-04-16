@@ -238,15 +238,16 @@ function nextCommand(_p)
 */
 function closeAll(_p)
 {
+    const p = [];
     if (_p.src)
-    {   _p.src.close();
+    {   p.push(_p.src.close().catch(() => {}));
         delete _p.src;
     }
-
     if (_p.dst)
-    {   _p.dst.close();
+    {   p.push(_p.dst.close().catch(() => {}));
         delete _p.dst;
     }
+    return Promise.all(p);
 }
 
 /**
@@ -569,40 +570,45 @@ function main()
                                 if (installed)
                                 {
                                     // Reset connections so they are re-created with the new package
-                                    closeAll(_p);
-                                    delete _p.src;
-                                    delete _p.dst;
-                                    resolve(true); // retry without touching the retry counter
+                                    return closeAll(_p).then(() =>
+                                    {
+                                        delete _p.src;
+                                        delete _p.dst;
+                                        resolve(true); // retry without touching the retry counter
+                                    });
                                 }
                                 else
                                 {
                                     Log(`Required package not installed — ${e.message || String(e)}`);
-                                    closeAll(_p);
-                                    exitCode = 1;
-                                    resolve(true); // give up on this command
+                                    return closeAll(_p).then(() =>
+                                    {
+                                        exitCode = 1;
+                                        resolve(true); // give up on this command
+                                    });
                                 }
                             });
                     }
 
                     Log(_p.verbose ? e : String(e));
-                    closeAll(_p);
+                    return closeAll(_p).then(() =>
+                    {
+                        if (0 >= _p.cmds.length)
+                        {   exitCode = 1;
+                            return resolve(true);
+                        }
 
-                    if (0 >= _p.cmds.length)
-                    {   exitCode = 1;
-                        return resolve(true);
-                    }
+                        if (0 < retry)
+                            retry--;
 
-                    if (0 < retry)
-                        retry--;
-
-                    if (!retry)
-                    {   exitCode = 1;
-                        return resolve(true);
-                    }
-                    else
-                    {   Log(`Retrying, retry count : ${(0 <= retry) ? retry : 'Infinite'}`);
-                        setTimeout(()=>{ resolve(true); }, 3000);
-                    }
+                        if (!retry)
+                        {   exitCode = 1;
+                            return resolve(true);
+                        }
+                        else
+                        {   Log(`Retrying, retry count : ${(0 <= retry) ? retry : 'Infinite'}`);
+                            setTimeout(()=>{ resolve(true); }, 3000);
+                        }
+                    });
                 });
         });
     })
@@ -612,9 +618,9 @@ function main()
             Log('Out of retries');
         else if (_p.verbose)
             Log('Done');
-        closeAll(_p);
-        process.exit(exitCode);
+        return closeAll(_p);
     })
+    .then(() => { process.exit(exitCode); })
     .catch((e)=> { Log(_p.verbose ? e : String(e)); process.exit(1); });
 
 }

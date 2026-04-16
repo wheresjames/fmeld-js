@@ -18,6 +18,9 @@
     "ssh2": "^1.5.0"
   },
   "peerDependencies": {
+    "unzipper": "^0.10.0",
+    "archiver": "^5.0.0",
+    "archiver-zip-encrypted": "^1.0.0",
     "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/lib-storage": "^3.0.0",
     "@azure/msal-node": "^2.0.0",
@@ -30,6 +33,9 @@
     "webdav": "^4.11.0"
   },
   "peerDependenciesMeta": {
+    "unzipper":                { "optional": true },
+    "archiver":                { "optional": true },
+    "archiver-zip-encrypted":  { "optional": true },
     "@aws-sdk/client-s3":    { "optional": true },
     "@aws-sdk/lib-storage":  { "optional": true },
     "@azure/msal-node":      { "optional": true },

@@ -26,6 +26,7 @@ const HAS_MSAL   = pkgAvailable('@azure/msal-node');
 const HAS_SMB2   = pkgAvailable('@marsaud/smb2');
 const HAS_BOX    = pkgAvailable('box-node-sdk');
 const HAS_ADB    = pkgAvailable('@devicefarmer/adbkit');
+const HAS_ZIP    = pkgAvailable('unzipper') && pkgAvailable('archiver');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -247,6 +248,7 @@ describe('getConnection', () =>
     const cases = [
         { url: 'fake:///3.5',             key: 'fakeClient',   connected: true  },
         { url: 'file:///tmp/test-fmeld',  key: 'fileClient',   connected: true  },
+        { url: 'zip:///tmp/test.zip',     key: 'zipClient',    connected: false },
         { url: 'ftp://user:pass@host/path',   key: 'ftpClient',  connected: false },
         { url: 'ftps://user:pass@host/path',  key: 'ftpClient',  connected: false },
         { url: 'sftp://user:pass@host/path',  key: 'sftpClient', connected: false },
@@ -340,6 +342,7 @@ describe('getConnection', () =>
             'onedrive:' : 'onedrive://Documents',
             'box:'      : 'box:///my-folder',
             'adb:'      : 'adb:///sdcard/',
+            'zip:'      : 'zip:///tmp/test.zip',
         };
 
         for (const b of fmeld.setup.BACKENDS)
@@ -1448,6 +1451,381 @@ describe('adbClient mocked behavior', () =>
             for (const m of METHODS)
                 assert.equal(typeof c[m], 'function', `missing: ${m}`);
         });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// zipClient
+// ---------------------------------------------------------------------------
+
+describe('zipClient', { skip: !HAS_ZIP ? 'unzipper or archiver package not installed' : false }, () =>
+{
+    /** Build a small ZIP at destPath containing the given entries. */
+    async function makeZip(destPath, entries)
+    {
+        const archiver = require('archiver');
+        const output   = fs.createWriteStream(destPath);
+        const archive  = archiver('zip', { zlib: { level: 6 } });
+        archive.pipe(output);
+        for (const { name, content } of entries)
+            archive.append(content, { name });
+        await new Promise((res, rej) => { output.on('close', res); archive.on('error', rej); archive.finalize(); });
+    }
+
+    test('exported as constructor', () =>
+    {
+        assert.equal(typeof fmeld.zipClient, 'function');
+    });
+
+    test('zip:// routes to zipClient', () =>
+    {
+        const c = fmeld.getConnection('zip:///tmp/test.zip', null, {});
+        assert.ok(c instanceof fmeld.zipClient);
+    });
+
+    test('exposes standard interface', () =>
+    {
+        const METHODS = ['connect', 'close', 'ls', 'mkDir', 'rmFile', 'rmDir',
+                         'createReadStream', 'createWriteStream', 'makePath',
+                         'getPrefix', 'isConnected'];
+        const c = fmeld.getConnection('zip:///tmp/test.zip', null, {});
+        for (const m of METHODS)
+            assert.equal(typeof c[m], 'function', `missing: ${m}`);
+    });
+
+    test('isConnected false before connect', () =>
+    {
+        const c = fmeld.getConnection('zip:///tmp/test.zip', null, {});
+        assert.equal(c.isConnected(), false);
+    });
+
+    test('getPrefix starts with zip://', () =>
+    {
+        const c = fmeld.getConnection('zip:///tmp/test.zip', null, {});
+        assert.ok(c.getPrefix().startsWith('zip://'));
+        assert.ok(c.getPrefix('/some/path').includes('some/path'));
+    });
+
+    test('makePath appends segment', () =>
+    {
+        const c = fmeld.getConnection('zip:///tmp/test.zip', null, {});
+        assert.ok(c.makePath('subdir').includes('subdir'));
+    });
+
+    test('connect resolves true and isConnected becomes true', async () =>
+    {
+        const c = fmeld.getConnection('zip:///tmp/fmeld-test-conn.zip', null, {});
+        assert.equal(await c.connect(), true);
+        assert.equal(c.isConnected(), true);
+        await c.close();
+    });
+
+    test('close without writes resolves true without creating an archive', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-nowrites-${Date.now()}.zip`);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        await c.connect();
+        assert.equal(await c.close(), true);
+        assert.equal(c.isConnected(), false);
+        assert.equal(fs.existsSync(archivePath), false);
+    });
+
+    test('ls on non-existent archive returns empty array', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-empty-${Date.now()}.zip`);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        await c.connect();
+        const list = await c.ls(archivePath);
+        assert.deepEqual(list, []);
+        await c.close();
+    });
+
+    test('ls root of existing archive returns correct entries', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-ls-${Date.now()}.zip`);
+        await makeZip(archivePath, [
+            { name: 'file.txt',      content: 'hello' },
+            { name: 'sub/deep.txt',  content: 'deep'  },
+        ]);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await c.connect();
+            const list = await c.ls(archivePath);
+            assert.equal(list.length, 2);
+            const names = list.map(e => e.name).sort();
+            assert.deepEqual(names, ['file.txt', 'sub']);
+            const sub = list.find(e => e.name === 'sub');
+            assert.equal(sub.isDir,  true);
+            assert.equal(sub.isFile, false);
+            const file = list.find(e => e.name === 'file.txt');
+            assert.equal(file.isFile, true);
+            assert.equal(file.size,   5);
+        }
+        finally
+        {
+            await c.close();
+            fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('ls subdirectory returns children', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-lssub-${Date.now()}.zip`);
+        await makeZip(archivePath, [
+            { name: 'sub/a.txt', content: 'aaa' },
+            { name: 'sub/b.txt', content: 'bbb' },
+        ]);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await c.connect();
+            const list = await c.ls(archivePath + '/sub');
+            assert.equal(list.length, 2);
+            assert.ok(list.every(e => e.isFile));
+        }
+        finally
+        {
+            await c.close();
+            fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('createReadStream reads a file from the archive', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-read-${Date.now()}.zip`);
+        await makeZip(archivePath, [{ name: 'hello.txt', content: 'hello world' }]);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await c.connect();
+            const rs      = await c.createReadStream(archivePath + '/hello.txt');
+            const content = await readStream(rs);
+            assert.equal(content, 'hello world');
+        }
+        finally
+        {
+            await c.close();
+            fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('createWriteStream then close creates a valid archive', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-write-${Date.now()}.zip`);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await c.connect();
+            const ws = await c.createWriteStream(archivePath + '/new.txt');
+            await writeStream(ws, 'new content');
+            await c.close();
+
+            assert.ok(fs.existsSync(archivePath));
+            const unzipper = require('unzipper');
+            const dir      = await unzipper.Open.file(archivePath);
+            const files    = dir.files.filter(f => f.type === 'File');
+            assert.equal(files.length, 1);
+            assert.equal(files[0].path, 'new.txt');
+            const buf = await files[0].buffer();
+            assert.equal(buf.toString(), 'new content');
+        }
+        finally
+        {
+            if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('createWriteStream adds a file to an existing archive', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-add-${Date.now()}.zip`);
+        await makeZip(archivePath, [{ name: 'existing.txt', content: 'existing' }]);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await c.connect();
+            const ws = await c.createWriteStream(archivePath + '/added.txt');
+            await writeStream(ws, 'added');
+            await c.close();
+
+            const unzipper = require('unzipper');
+            const dir      = await unzipper.Open.file(archivePath);
+            const files    = dir.files.filter(f => f.type === 'File').map(f => f.path).sort();
+            assert.deepEqual(files, ['added.txt', 'existing.txt']);
+        }
+        finally
+        {
+            if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('rmFile removes a file from an existing archive', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-rm-${Date.now()}.zip`);
+        await makeZip(archivePath, [
+            { name: 'keep.txt',   content: 'keep'   },
+            { name: 'delete.txt', content: 'delete' },
+        ]);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await c.connect();
+            await c.rmFile(archivePath + '/delete.txt');
+            await c.close();
+
+            const unzipper = require('unzipper');
+            const dir      = await unzipper.Open.file(archivePath);
+            const files    = dir.files.filter(f => f.type === 'File').map(f => f.path);
+            assert.deepEqual(files, ['keep.txt']);
+        }
+        finally
+        {
+            if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('rmDir removes a subdirectory and its contents', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-rmdir-${Date.now()}.zip`);
+        await makeZip(archivePath, [
+            { name: 'keep.txt',     content: 'keep'  },
+            { name: 'sub/a.txt',    content: 'a'     },
+            { name: 'sub/b.txt',    content: 'b'     },
+        ]);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await c.connect();
+            await c.rmDir(archivePath + '/sub', { recursive: true });
+            await c.close();
+
+            const unzipper = require('unzipper');
+            const dir      = await unzipper.Open.file(archivePath);
+            const files    = dir.files.filter(f => f.type === 'File').map(f => f.path);
+            assert.deepEqual(files, ['keep.txt']);
+        }
+        finally
+        {
+            if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('copyDir file→zip produces a readable archive', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-cpdir-${Date.now()}.zip`);
+        const srcDir      = path.join(os.tmpdir(), `fmeld-zip-src-${Date.now()}`);
+        fs.mkdirSync(srcDir, { recursive: true });
+        fs.writeFileSync(path.join(srcDir, 'alpha.txt'), 'alpha');
+        fs.writeFileSync(path.join(srcDir, 'beta.txt'),  'beta');
+
+        const src = fmeld.getConnection(`file://${srcDir}`,  null, {});
+        const dst = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await Promise.all([src.connect(), dst.connect()]);
+            await fmeld.copyDir(src, dst, srcDir, archivePath, { recursive: true, batch: 1 });
+            await Promise.all([src.close(), dst.close()]);
+
+            const unzipper = require('unzipper');
+            const dir      = await unzipper.Open.file(archivePath);
+            const files    = dir.files.filter(f => f.type === 'File').map(f => f.path).sort();
+            assert.deepEqual(files, ['alpha.txt', 'beta.txt']);
+        }
+        finally
+        {
+            fs.rmSync(srcDir, { recursive: true, force: true });
+            if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('orphan staging dirs older than 24h are removed on connect', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-orphan-${Date.now()}.zip`);
+        const orphanDir   = archivePath + '.staging.deadbeef';
+        fs.mkdirSync(path.join(orphanDir, 'files'), { recursive: true });
+        fs.writeFileSync(path.join(orphanDir, 'meta.json'), '{}');
+        // Backdate the orphan beyond the 24h threshold
+        const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+        fs.utimesSync(orphanDir, old, old);
+
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        await c.connect();
+        assert.equal(fs.existsSync(orphanDir), false, 'orphan dir should have been removed');
+        await c.close();
+    });
+
+    test('no staging files left after a successful write + close', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-clean-${Date.now()}.zip`);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await c.connect();
+            const ws = await c.createWriteStream(archivePath + '/f.txt');
+            await writeStream(ws, 'data');
+            await c.close();
+
+            // No staging dirs beside the archive
+            const dir    = path.dirname(archivePath);
+            const base   = path.basename(archivePath);
+            const leftovers = fs.readdirSync(dir)
+                .filter(e => e.startsWith(base + '.staging.') || e.startsWith(base + '.final.'));
+            assert.deepEqual(leftovers, []);
+        }
+        finally
+        {
+            if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('close() after writes logs success message with archive path', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-log-${Date.now()}.zip`);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        const logged = [];
+        const origLog = console.log;
+        console.log = (...args) => { logged.push(args.join(' ')); };
+        try
+        {
+            await c.connect();
+            const ws = await c.createWriteStream(archivePath + '/f.txt');
+            await writeStream(ws, 'data');
+            await c.close();
+            assert.ok(
+                logged.some(msg => msg.includes(archivePath)),
+                'success message should include archive path'
+            );
+        }
+        finally
+        {
+            console.log = origLog;
+            if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('close() after writes emits compressing status to stderr', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-progress-${Date.now()}.zip`);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        const stderrLines = [];
+        const origWrite = process.stderr.write.bind(process.stderr);
+        process.stderr.write = (data, ...rest) => { stderrLines.push(String(data)); return origWrite(data, ...rest); };
+        try
+        {
+            await c.connect();
+            const ws = await c.createWriteStream(archivePath + '/f.txt');
+            await writeStream(ws, 'progress test data');
+            await c.close();
+            assert.ok(
+                stderrLines.some(s => s.includes('compressing')),
+                'stderr should contain compressing status'
+            );
+        }
+        finally
+        {
+            process.stderr.write = origWrite;
+            if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+        }
     });
 });
 

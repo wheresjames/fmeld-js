@@ -89,6 +89,7 @@ If you try to use a backend whose package isn't installed, fmeld will ask whethe
 | Backend | URL scheme | Notes |
 |---|---|---|
 | Local filesystem | `file://` | Standard local paths |
+| ZIP archive | `zip://` | Read and write ZIP files as a virtual directory |
 | FTP | `ftp://` | Active and passive mode — installed by default |
 | FTPS | `ftps://` | FTP over TLS (explicit) — installed by default |
 | SFTP | `sftp://` | SSH key or password auth — installed by default |
@@ -117,6 +118,10 @@ scheme://[user[:password]@]host[:port]/path[?key=value&...]
 
 ```
 file:///home/user/documents
+zip:///home/user/archive.zip
+zip:///home/user/archive.zip?password=secret
+zip:///home/user/archive.zip?passwordfile=~/.zippass
+zip:///home/user/archive.zip?compression=6&method=deflate
 ftp://alice:s3cr3t@ftp.example.com:21/uploads
 ftps://alice:s3cr3t@ftp.example.com/uploads
 sftp://alice@sftp.example.com:22/backups
@@ -296,6 +301,9 @@ If you try to use a backend whose package is not installed and a terminal is att
 To install a specific backend manually:
 
 ```bash
+# ZIP archives
+npm install -g unzipper archiver archiver-zip-encrypted
+
 # Amazon S3
 npm install -g @aws-sdk/client-s3 @aws-sdk/lib-storage
 
@@ -402,6 +410,56 @@ fmeld -s sftp://user@myserver.com/logs \
       -d file:///var/logs/remote sync -Ur --filter-files '\.log$'
 ```
 
+### ZIP archives
+
+fmeld treats a ZIP file as a virtual directory. All writes go to a disk staging area; the original archive is never modified in place. On close the archive is rebuilt, verified, and atomically swapped into place.
+
+For large archives, fmeld prints real-time progress to stderr during compression and prints a final success line when done:
+
+```
+zip: compressing 1234/5678 files, 234.5 MB written (21%)
+zip: saved /home/user/archive.zip (1.2 GB)
+```
+
+```bash
+# List the contents of a ZIP archive
+fmeld -s zip:///home/user/archive.zip ls -r
+
+# Copy a local directory into a new ZIP archive
+fmeld -s file:///home/user/photos -d zip:///home/user/photos.zip cp -r
+
+# Extract a ZIP archive to a local directory
+fmeld -s zip:///home/user/photos.zip -d file:///tmp/extracted cp -r
+
+# Sync a local directory into an existing ZIP archive (only changed files)
+fmeld -s file:///home/user/docs -d zip:///home/user/docs.zip sync -Ur
+
+# Sync files from an Android device into a ZIP archive in the current directory
+fmeld -s adb:///sdcard -d zip://$PWD/backup.zip sync -r
+
+# Copy from an SFTP server directly into a local ZIP archive
+fmeld -S ~/.sftp-pass -s sftp://user@server.com/exports \
+      -d zip:///home/user/exports.zip cp -r
+
+# Create an AES-256 encrypted ZIP from a credential file
+fmeld -E ~/.zip-pass -s file:///home/user/sensitive \
+      -d zip:///home/user/sensitive.zip cp -r
+
+# Use an inline password (shows in shell history — testing only)
+fmeld -s file:///home/user/data \
+      -d 'zip:///home/user/data.zip?password=mysecret' cp -r
+
+# Use a compressed ZIP with maximum compression
+fmeld -s file:///home/user/logs \
+      -d 'zip:///home/user/logs.zip?compression=9' cp -r
+```
+
+Staging files are written beside the archive as `<archive>.staging.<token>/`. If the process is interrupted, the original archive is untouched and the staging directory is left on disk with a console warning. Orphan staging directories older than 24 hours are automatically removed on the next run.
+
+&nbsp;
+
+---
+
 ### Make / remove directories
 
 ```bash
@@ -501,6 +559,7 @@ fmeld.toHuman(bytes)                            // Format bytes as "1.23 MB" etc
 // Low-level client constructors (if you want to instantiate directly)
 fmeld.fakeClient(args, opts)       // In-memory fake tree — useful for testing
 fmeld.fileClient(args, opts)
+fmeld.zipClient(args, opts)
 fmeld.ftpClient(args, opts)
 fmeld.sftpClient(args, opts)
 fmeld.gcsClient(args, opts)
@@ -892,7 +951,7 @@ MIT — see [LICENSE](LICENSE)
 | **[lftp](https://github.com/lavv17/lftp)** | C++ | CLI | ~10 | GPL v3 | High — 25+ years |
 | **[Flysystem](https://github.com/thephpleague/flysystem)** | PHP | Library | ~15 (via adapters) | MIT | High — 10+ years |
 | **[Apache Commons VFS](https://commons.apache.org/proper/commons-vfs/)** | Java | Library | ~15 | Apache 2.0 | High — 20+ years |
-| **fmeld** | Node.js | CLI + Library | 14 | MIT | Early-stage |
+| **fmeld** | Node.js | CLI + Library | 15 | MIT | Early-stage |
 
 &nbsp;
 
