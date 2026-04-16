@@ -4,3 +4,4 @@ package-lock.json
 /tmp/
 /reports/
 __pycache__
+/todo/
