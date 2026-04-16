@@ -25,6 +25,7 @@ const HAS_AZBLOB = pkgAvailable('@azure/storage-blob');
 const HAS_MSAL   = pkgAvailable('@azure/msal-node');
 const HAS_SMB2   = pkgAvailable('@marsaud/smb2');
 const HAS_BOX    = pkgAvailable('box-node-sdk');
+const HAS_ADB    = pkgAvailable('@devicefarmer/adbkit');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -338,6 +339,7 @@ describe('getConnection', () =>
             'abs:'      : 'abs://mycontainer/path',
             'onedrive:' : 'onedrive://Documents',
             'box:'      : 'box:///my-folder',
+            'adb:'      : 'adb:///sdcard/',
         };
 
         for (const b of fmeld.setup.BACKENDS)
@@ -1270,6 +1272,186 @@ describe('onedriveClient', { skip: !HAS_MSAL ? '@azure/msal-node package not ins
 });
 
 // ---------------------------------------------------------------------------
+// adbClient — mocked offline tests
+// ---------------------------------------------------------------------------
+
+describe('adbClient mocked behavior', () =>
+{
+    function withMockedAdb(fakeAdbkit, fn)
+    {
+        const originalRequireBackend = setup.requireBackend;
+        setup.requireBackend = () => fakeAdbkit;
+        return Promise.resolve()
+            .then(fn)
+            .finally(() =>
+            {
+                setup.requireBackend = originalRequireBackend;
+            });
+    }
+
+    // Minimal adbkit stub that reports one online USB device
+    function makeAdbkit(serial = 'TESTSERIAL01', extraSetup = {})
+    {
+        const deviceObj = Object.assign(
+        {
+            shell:   (cmd) => Promise.resolve(
+                Object.assign({ on(ev, cb) { if (ev === 'end') cb(); return this; } },
+                              extraSetup.shell ? extraSetup.shell(cmd) : {})
+            ),
+            readdir: (dir) => Promise.resolve([]),
+            pull:    (f)   => Promise.resolve({ on(e,cb){ return this; } }),
+            push:    (s,f,m) =>
+            {
+                const t = { on(e,cb){ if(e==='end') setTimeout(cb,0); return this; } };
+                return Promise.resolve(t);
+            },
+        },
+        extraSetup.sync || {}
+        );
+
+        return {
+            createClient: () =>
+            ({
+                listDevices: () => Promise.resolve([{ id: serial, type: 'device' }]),
+                connect:     () => Promise.resolve(serial),
+                getDevice:   (s) => deviceObj,
+            })
+        };
+    }
+
+    test('exported as constructor', () =>
+    {
+        assert.equal(typeof fmeld.adbClient, 'function');
+    });
+
+    test('isConnected false before connect', () =>
+    {
+        return withMockedAdb(makeAdbkit(), () =>
+        {
+            const c = fmeld.getConnection('adb:///sdcard/', null, {verbose: false});
+            assert.equal(c.isConnected(), false);
+        });
+    });
+
+    test('getPrefix contains serial after connect', async () =>
+    {
+        return withMockedAdb(makeAdbkit('ABC123'), async () =>
+        {
+            const c = fmeld.getConnection('adb:///sdcard/', null, {verbose: false});
+            await c.connect();
+            assert.ok(c.getPrefix().includes('ABC123'));
+            await c.close();
+        });
+    });
+
+    test('TCP/IP URL encodes host:port in prefix', () =>
+    {
+        return withMockedAdb(makeAdbkit('192.168.1.5:5555'), () =>
+        {
+            const c = fmeld.getConnection('adb://192.168.1.5:5555/sdcard/', null, {verbose: false});
+            // prefix is set from URL args before connect
+            assert.ok(c.getPrefix().includes('192.168.1.5'));
+        });
+    });
+
+    test('makePath appends sub-path', () =>
+    {
+        return withMockedAdb(makeAdbkit(), () =>
+        {
+            const c = fmeld.getConnection('adb:///sdcard/', null, {verbose: false});
+            assert.ok(c.makePath('DCIM').includes('DCIM'));
+        });
+    });
+
+    test('connect resolves true and isConnected becomes true', async () =>
+    {
+        return withMockedAdb(makeAdbkit('DEV001'), async () =>
+        {
+            const c = fmeld.getConnection('adb:///sdcard/', null, {verbose: false});
+            assert.equal(await c.connect(), true);
+            assert.equal(c.isConnected(), true);
+            await c.close();
+        });
+    });
+
+    test('close resolves true and isConnected becomes false', async () =>
+    {
+        return withMockedAdb(makeAdbkit(), async () =>
+        {
+            const c = fmeld.getConnection('adb:///sdcard/', null, {verbose: false});
+            await c.connect();
+            assert.equal(await c.close(), true);
+            assert.equal(c.isConnected(), false);
+        });
+    });
+
+    test('close without connect resolves true', async () =>
+    {
+        return withMockedAdb(makeAdbkit(), async () =>
+        {
+            const c = fmeld.getConnection('adb:///sdcard/', null, {verbose: false});
+            assert.equal(await c.close(), true);
+        });
+    });
+
+    test('connect rejects when no devices found', async () =>
+    {
+        const emptyAdbkit = {
+            createClient: () => ({ listDevices: () => Promise.resolve([]) })
+        };
+        return withMockedAdb(emptyAdbkit, async () =>
+        {
+            const c = fmeld.getConnection('adb:///sdcard/', null, {verbose: false});
+            await assert.rejects(() => c.connect(), /No ADB devices found/);
+        });
+    });
+
+    test('connect rejects when named serial not found', async () =>
+    {
+        return withMockedAdb(makeAdbkit('DIFFERENT'), async () =>
+        {
+            const c = fmeld.getConnection('adb://MYSERIAL/sdcard/', null, {verbose: false});
+            await assert.rejects(() => c.connect(), /ADB device not found/);
+        });
+    });
+
+    test('ls returns mapped file list', async () =>
+    {
+        const entries = [
+            { name: 'Camera', mode: 0x4000 | 0o755, size: 0,    mtime: 1000 },
+            { name: 'photo.jpg', mode: 0o644,        size: 2048, mtime: 2000 },
+        ];
+        const kit = makeAdbkit('DEV', { sync: { readdir: () => Promise.resolve(entries) } });
+        return withMockedAdb(kit, async () =>
+        {
+            const c = fmeld.getConnection('adb:///sdcard/', null, {verbose: false});
+            await c.connect();
+            const list = await c.ls('/sdcard');
+            assert.equal(list.length, 2);
+            assert.equal(list[0].name, 'Camera');
+            assert.equal(list[0].isDir, true);
+            assert.equal(list[1].name, 'photo.jpg');
+            assert.equal(list[1].isFile, true);
+            assert.equal(list[1].size, 2048);
+            await c.close();
+        });
+    });
+
+    test('exposes standard interface', () =>
+    {
+        return withMockedAdb(makeAdbkit(), () =>
+        {
+            const METHODS = ['connect', 'close', 'ls', 'mkDir', 'rmFile', 'rmDir',
+                             'createReadStream', 'createWriteStream', 'makePath',
+                             'getPrefix', 'isConnected'];
+            const c = fmeld.getConnection('adb:///sdcard/', null, {verbose: false});
+            for (const m of METHODS)
+                assert.equal(typeof c[m], 'function', `missing: ${m}`);
+        });
+    });
+});
+
+// ---------------------------------------------------------------------------
 // fakeClient — tree structure and interface
 // ---------------------------------------------------------------------------
 
@@ -1684,10 +1866,10 @@ describe('fmeld.setup', () =>
         }
     });
 
-    test('pkgAvailable returns true for a built-in module', () =>
+    test('pkgAvailable returns true for an installed npm package', () =>
     {
-        assert.equal(setupPkgAvailable('fs'), true);
-        assert.equal(setupPkgAvailable('path'), true);
+        // 'sparen' is a hard dependency, always present in fmeld's own node_modules
+        assert.equal(setupPkgAvailable('sparen'), true);
     });
 
     test('pkgAvailable returns false for a non-existent package', () =>
@@ -1697,10 +1879,10 @@ describe('fmeld.setup', () =>
 
     test('requireBackend returns the module when the package is installed', () =>
     {
-        // 'path' is always available — use it as a canary
-        const result = setup.requireBackend('path', 'test://');
+        // 'sparen' is a hard dependency, always present in fmeld's own node_modules
+        const result = setup.requireBackend('sparen', 'test://');
         assert.ok(result);
-        assert.equal(typeof result.join, 'function');
+        assert.equal(typeof result, 'object');
     });
 
     test('requireBackend throws BACKEND_NOT_INSTALLED for a missing package', () =>
@@ -1786,6 +1968,7 @@ describe('fmeld exports', () =>
         'fakeClient', 'fileClient', 'ftpClient', 'sftpClient',
         'gcsClient', 'gdriveClient', 'dropboxClient', 's3Client',
         'webdavClient', 'azblobClient', 'onedriveClient', 'smbClient', 'boxClient',
+        'adbClient',
     ];
     const configFns = [
         'promiseWhile', 'promiseDoWhile', 'promiseWhileBatch',

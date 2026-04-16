@@ -280,29 +280,38 @@ function runSetup()
 
         let cursor = 0;
 
-        const bold  = '\x1b[1m';
-        const dim   = '\x1b[2m';
-        const green = '\x1b[32m';
-        const cyan  = '\x1b[36m';
-        const reset = '\x1b[0m';
+        const bold   = '\x1b[1m';
+        const dim    = '\x1b[2m';
+        const green  = '\x1b[32m';
+        const yellow = '\x1b[33m';
+        const cyan   = '\x1b[36m';
+        const reset  = '\x1b[0m';
 
         function render()
         {
             process.stdout.write('\x1b[2J\x1b[H');
             process.stdout.write(`${bold}  fmeld backend setup${reset}\n\n`);
             process.stdout.write(
-                `  ${dim}↑↓ navigate   SPACE toggle   a select-all   n select-none   ENTER install   q quit${reset}\n\n`
+                `  ${dim}↑↓ navigate   SPACE toggle   a select-all   n select-none   ENTER apply   q quit${reset}\n\n`
             );
 
             items.forEach((item, i) =>
             {
-                const hi     = i === cursor;
-                const check  = item.selected ? `${green}[x]${reset}` : `[ ]`;
-                const label  = item.label.padEnd(26);
-                const pkgs   = item.pkgs.join(' ');
-                const status = item.installed
-                    ? `${dim}(installed)${reset}`
-                    : `${dim}(${item.size})${reset}`;
+                const hi    = i === cursor;
+                const check = item.selected ? `${green}[x]${reset}` : `[ ]`;
+                const label = item.label.padEnd(26);
+                const pkgs  = item.pkgs.join(' ');
+
+                let status;
+                if (item.installed && item.selected)
+                    status = `${dim}(installed)${reset}`;
+                else if (item.installed && !item.selected)
+                    status = `${yellow}(will remove)${reset}`;
+                else if (!item.installed && item.selected)
+                    status = `${dim}(will install — ${item.size})${reset}`;
+                else
+                    status = `${dim}(${item.size})${reset}`;
+
                 const prefix = hi ? `${cyan}>${reset} ` : '  ';
                 const name   = hi ? `${bold}${label}${reset}` : label;
                 process.stdout.write(`${prefix}${check} ${name} ${pkgs} ${status}\n`);
@@ -342,26 +351,43 @@ function runSetup()
                 process.stdin.removeListener('data', handler);
                 cleanup();
 
-                const toInstall = items.filter(i => i.selected && !i.installed);
-                if (!toInstall.length)
+                const toInstall   = items.filter(i =>  i.selected && !i.installed);
+                const toUninstall = items.filter(i => !i.selected &&  i.installed);
+
+                if (!toInstall.length && !toUninstall.length)
                 {
-                    process.stdout.write('\n  Nothing new to install.\n\n');
+                    process.stdout.write('\n  Nothing to change.\n\n');
                     return resolve();
                 }
 
-                // Deduplicate in case two backends share a package
-                const pkgs = [...new Set(toInstall.flatMap(i => i.pkgs))];
-                process.stdout.write(`\n  Installing: ${pkgs.join(' ')}\n\n`);
+                // Don't remove a package that is still needed by another kept backend
+                const keepPkgs = new Set(items.filter(i => i.selected).flatMap(i => i.pkgs));
+                const pkgsToRemove = [...new Set(
+                    toUninstall.flatMap(i => i.pkgs).filter(p => !keepPkgs.has(p))
+                )];
+
+                const pkgsToInstall = [...new Set(toInstall.flatMap(i => i.pkgs))];
 
                 try
                 {
-                    setup.installPackages(pkgs);
-                    process.stdout.write('\n  Done! The selected backends are ready to use.\n\n');
+                    if (pkgsToInstall.length)
+                    {
+                        process.stdout.write(`\n  Installing: ${pkgsToInstall.join(' ')}\n\n`);
+                        setup.installPackages(pkgsToInstall);
+                    }
+
+                    if (pkgsToRemove.length)
+                    {
+                        process.stdout.write(`\n  Uninstalling: ${pkgsToRemove.join(' ')}\n\n`);
+                        setup.uninstallPackages(pkgsToRemove);
+                    }
+
+                    process.stdout.write('\n  Done!\n\n');
                     resolve();
                 }
                 catch(e)
                 {
-                    process.stderr.write(`\n  Install failed: ${String(e)}\n`);
+                    process.stderr.write(`\n  Failed: ${String(e)}\n`);
                     reject(e);
                 }
             }

@@ -1,7 +1,7 @@
 
 # fmeld
 
-Move and sync files between local drives, FTP, FTPS, SFTP, Google Cloud Storage, Google Drive, Dropbox, Amazon S3, Box, Windows network shares, and more — from one command line tool or Node.js library.
+Move and sync files between local drives, FTP, FTPS, SFTP, Google Cloud Storage, Google Drive, Dropbox, Amazon S3, Box, Windows network shares, Android devices, and more — from one command line tool or Node.js library.
 
 ```bash
 # Copy a local folder up to an FTP server
@@ -46,6 +46,7 @@ fmeld -s file:///tmp clean --before "1 day ago" --clean-all
   - [OneDrive](#onedrive)
   - [Windows Network Shares (SMB/CIFS)](#windows-network-shares-smbcifs)
   - [Box](#box)
+  - [Android Devices (ADB)](#android-devices-adb)
 - [Alternatives](#alternatives)
 
 &nbsp;
@@ -100,6 +101,7 @@ If you try to use a backend whose package isn't installed, fmeld will ask whethe
 | OneDrive | `onedrive://` | OAuth2, token cached after first login |
 | Windows Network Share | `smb://` or `cifs://` | SMB2/CIFS — NAS, Windows shares, Samba |
 | Box | `box://` | Box.com cloud storage, JWT app auth or developer token |
+| Android Device (ADB) | `adb://` | Android Debug Bridge — USB or TCP/IP connected devices |
 
 &nbsp;
 
@@ -131,6 +133,8 @@ smb://user:pass@server/sharename
 smb://DOMAIN;user:pass@server/sharename/path/to/dir
 cifs://user:pass@nas.local/backups/archive
 box:///My Box Folder/subfolder
+adb:///sdcard/DCIM/
+adb://192.168.1.100:5555/sdcard/
 ```
 
 Query string parameters are passed through as extra options to the backend driver.
@@ -318,6 +322,9 @@ npm install -g @marsaud/smb2
 
 # Box.com
 npm install -g box-node-sdk
+
+# Android devices (ADB)
+npm install -g @devicefarmer/adbkit
 ```
 
 &nbsp;
@@ -505,6 +512,7 @@ fmeld.azblobClient(args, opts)
 fmeld.onedriveClient(args, opts)
 fmeld.smbClient(args, opts)
 fmeld.boxClient(args, opts)
+fmeld.adbClient(args, opts)
 
 // Backend registry and optional-dependency helpers
 fmeld.setup.BACKENDS               // Array of backend descriptors (key, label, pkgs, size, schemes)
@@ -811,6 +819,44 @@ The URL path is the folder tree within Box. The root maps to the top of the auth
 
 ---
 
+### Android Devices (ADB)
+
+fmeld talks to Android devices via the Android Debug Bridge using the `@devicefarmer/adbkit` package. No credentials file is required — ADB handles its own device authorization via the on-device prompt.
+
+**Prerequisites:**
+- Install [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools) (provides the `adb` binary)
+- Enable **Developer options** and **USB debugging** on the device
+- For TCP/IP connections, run `adb tcpip 5555` on the device first
+
+**URL formats:**
+```
+adb:///sdcard/DCIM/              — first available (USB or already-connected TCP/IP) device
+adb://SERIALNUMBER/sdcard/       — specific device by USB serial number
+adb://192.168.1.100:5555/sdcard/ — TCP/IP connected device
+```
+
+The serial number of connected devices can be found with `adb devices`.
+
+**Examples:**
+```bash
+# List files on the first connected Android device
+fmeld -s adb:///sdcard/DCIM/ ls
+
+# Copy photos from a specific device to local
+fmeld -s adb://R58M123ABCD/sdcard/DCIM/Camera -d file:///home/user/photos cp -r
+
+# Sync from a TCP/IP connected device
+fmeld -s adb://192.168.1.100:5555/sdcard/Documents \
+      -d file:///home/user/android-docs sync -Dr
+
+# Upload files to the device
+fmeld -s file:///home/user/music -d adb:///sdcard/Music cp -r
+```
+
+&nbsp;
+
+---
+
 ## Testing
 
 The test suite uses the built-in [`node:test`](https://nodejs.org/api/test.html) runner (Node 18+):
@@ -846,7 +892,7 @@ MIT — see [LICENSE](LICENSE)
 | **[lftp](https://github.com/lavv17/lftp)** | C++ | CLI | ~10 | GPL v3 | High — 25+ years |
 | **[Flysystem](https://github.com/thephpleague/flysystem)** | PHP | Library | ~15 (via adapters) | MIT | High — 10+ years |
 | **[Apache Commons VFS](https://commons.apache.org/proper/commons-vfs/)** | Java | Library | ~15 | Apache 2.0 | High — 20+ years |
-| **fmeld** | Node.js | CLI + Library | 13 | MIT | Early-stage |
+| **fmeld** | Node.js | CLI + Library | 14 | MIT | Early-stage |
 
 &nbsp;
 
