@@ -5,14 +5,14 @@ Move and sync files between local drives, FTP, FTPS, SFTP, Google Cloud Storage,
 
 ```bash
 # Copy a local folder up to an FTP server
-fmeld -s file:///home/user/photos -d ftp://user:pass@myserver.com/photos cp -r
+fmeld -s ~/photos -d ftp://user:pass@myserver.com/photos cp -r
 
 # Sync a Google Drive folder down to an SFTP server
 fmeld -S ./gdrive-creds.json -s gdrive://backups \
       -d sftp://user@myserver.com/backups sync -Ur
 
 # Clean up temp files older than one day
-fmeld -s file:///tmp clean --before "1 day ago" --clean-all
+fmeld -s /tmp clean --before "1 day ago" --clean-all
 ```
 
 &nbsp;
@@ -32,6 +32,7 @@ fmeld -s file:///tmp clean --before "1 day ago" --clean-all
   - [List files](#list-files)
   - [Copy files](#copy-files)
   - [Sync files](#sync-files)
+  - [ZIP archives](#zip-archives)
   - [Make / remove directories](#make--remove-directories)
   - [Clean old files](#clean-old-files)
   - [Find and remove duplicates](#find-and-remove-duplicates)
@@ -89,8 +90,8 @@ If you try to use a backend whose package isn't installed, fmeld will ask whethe
 
 | Backend | URL scheme | Notes |
 |---|---|---|
-| Local filesystem | `file://` | Standard local paths |
-| ZIP archive | `zip://` | Read and write ZIP files as a virtual directory |
+| Local filesystem | `file://` or bare path | `/abs`, `./rel`, `../rel`, `~/home` all work without a prefix |
+| ZIP archive | `zip://` or `.zip` path | Read and write ZIP files as a virtual directory |
 | FTP | `ftp://` | Active and passive mode — installed by default |
 | FTPS | `ftps://` | FTP over TLS (explicit) — installed by default |
 | SFTP | `sftp://` | SSH key or password auth — installed by default |
@@ -111,6 +112,17 @@ If you try to use a backend whose package isn't installed, fmeld will ask whethe
 
 ## URL format
 
+For local paths, just pass the path directly — no scheme required:
+
+```bash
+fmeld -s ~/photos ls
+fmeld -s ./backups ls
+fmeld -s /mnt/nas/data ls
+fmeld -s ~/archive.zip ls -r      # .zip extension routes to zip:// automatically
+```
+
+For remote or protocol-specific connections use a full URL:
+
 ```
 scheme://[user[:password]@]host[:port]/path[?key=value&...]
 ```
@@ -118,7 +130,6 @@ scheme://[user[:password]@]host[:port]/path[?key=value&...]
 **Examples:**
 
 ```
-file:///home/user/documents
 zip:///home/user/archive.zip
 zip:///home/user/archive.zip?password=secret
 zip:///home/user/archive.zip?passwordfile=~/.zippass
@@ -282,8 +293,8 @@ fmeld [options] [ls|cp|sync|md|rm|unlink|clean|dupes]
     --remaining     [arg]  Action for non-kept files when --keep is set:
                            review (default) — leave them for interactive review
                            delete           — mark them for deletion
-                           link             — replace them with hardlinks (file://
-                                            backend only)
+                           link             — replace them with hardlinks (local
+                                            filesystem only)
     --force-preset         Re-apply preset even when a group already has decisions
                            from a previously loaded session.
     --include-empty        Include zero-byte files in duplicate detection (they are
@@ -386,6 +397,9 @@ npm install -g @devicefarmer/adbkit
 ### List files
 
 ```bash
+# List a local directory
+fmeld -s ~/photos ls
+
 # List files on an FTP server
 fmeld -s ftp://user:pass@myserver.com/uploads ls
 
@@ -406,17 +420,17 @@ fmeld -s s3://my-bucket/reports ls
 
 ```bash
 # Copy a local directory to an FTP server
-fmeld -s file:///home/user/photos -d ftp://user:pass@myserver.com/photos cp -r
+fmeld -s ~/photos -d ftp://user:pass@myserver.com/photos cp -r
 
 # Copy from FTP to a local directory
-fmeld -s ftp://user:pass@myserver.com/photos -d file:///tmp/photos cp -r
+fmeld -s ftp://user:pass@myserver.com/photos -d /tmp/photos cp -r
 
 # Copy from SFTP to local, using a password file
 fmeld -S /run/secrets/sftp-pass -s sftp://user@myserver.com/data \
-      -d file:///home/user/data cp -r
+      -d ~/data cp -r
 
 # Copy and flatten all files into one directory (no sub-folders)
-fmeld -s sftp://user@myserver.com/archive -d file:///tmp/flat cp -rG
+fmeld -s sftp://user@myserver.com/archive -d /tmp/flat cp -rG
 ```
 
 ### Sync files
@@ -425,12 +439,10 @@ fmeld -s sftp://user@myserver.com/archive -d file:///tmp/flat cp -rG
 
 ```bash
 # Upload new or changed files from local to SFTP
-fmeld -s file:///home/user/site \
-      -d sftp://user@myserver.com/www sync -Ur
+fmeld -s ~/site -d sftp://user@myserver.com/www sync -Ur
 
 # Pull any files missing locally from SFTP (but don't overwrite changed ones)
-fmeld -s sftp://user@myserver.com/www \
-      -d file:///home/user/site sync -Dr
+fmeld -s sftp://user@myserver.com/www -d ~/site sync -Dr
 
 # Two-way mirror between Google Drive and SFTP
 fmeld -S ./gdrive-creds.json \
@@ -442,21 +454,19 @@ fmeld -S ./gdrive-creds.json  -s gdrive://backups \
       -E ./dropbox-creds.json -d dropbox:///backups sync -Ur -b 4
 
 # Sync a local directory up to S3
-fmeld -S ./s3-creds.json -s file:///home/user/backups \
-      -d s3://my-bucket/backups sync -Ur
+fmeld -S ./s3-creds.json -s ~/backups -d s3://my-bucket/backups sync -Ur
 
 # Sync from S3 to a local directory
-fmeld -S ./s3-creds.json -s s3://my-bucket/backups \
-      -d file:///home/user/backups sync -Dr
+fmeld -S ./s3-creds.json -s s3://my-bucket/backups -d ~/backups sync -Dr
 
 # Sync only .log files
-fmeld -s sftp://user@myserver.com/logs \
-      -d file:///var/logs/remote sync -Ur --filter-files '\.log$'
+fmeld -s sftp://user@myserver.com/logs -d /var/logs/remote \
+      sync -Ur --filter-files '\.log$'
 ```
 
 ### ZIP archives
 
-fmeld treats a ZIP file as a virtual directory. All writes go to a disk staging area; the original archive is never modified in place. On close the archive is rebuilt, verified, and atomically swapped into place.
+fmeld treats a ZIP file as a virtual directory. Just use a `.zip` path directly — fmeld detects the extension and routes to the ZIP backend automatically. All writes go to a disk staging area; the original archive is never modified in place. On close the archive is rebuilt, verified, and atomically swapped into place.
 
 For large archives, fmeld prints real-time progress to stderr during compression and prints a final success line when done:
 
@@ -467,35 +477,31 @@ zip: saved /home/user/archive.zip (1.2 GB)
 
 ```bash
 # List the contents of a ZIP archive
-fmeld -s zip:///home/user/archive.zip ls -r
+fmeld -s ~/archive.zip ls -r
 
 # Copy a local directory into a new ZIP archive
-fmeld -s file:///home/user/photos -d zip:///home/user/photos.zip cp -r
+fmeld -s ~/photos -d ~/photos.zip cp -r
 
 # Extract a ZIP archive to a local directory
-fmeld -s zip:///home/user/photos.zip -d file:///tmp/extracted cp -r
+fmeld -s ~/photos.zip -d /tmp/extracted cp -r
 
 # Sync a local directory into an existing ZIP archive (only changed files)
-fmeld -s file:///home/user/docs -d zip:///home/user/docs.zip sync -Ur
+fmeld -s ~/docs -d ~/docs.zip sync -Ur
 
-# Sync files from an Android device into a ZIP archive in the current directory
-fmeld -s adb:///sdcard -d zip://$PWD/backup.zip sync -r
+# Sync files from an Android device into a ZIP archive
+fmeld -s adb:///sdcard -d ./backup.zip sync -r
 
 # Copy from an SFTP server directly into a local ZIP archive
-fmeld -S ~/.sftp-pass -s sftp://user@server.com/exports \
-      -d zip:///home/user/exports.zip cp -r
+fmeld -S ~/.sftp-pass -s sftp://user@server.com/exports -d ~/exports.zip cp -r
 
 # Create an AES-256 encrypted ZIP from a credential file
-fmeld -E ~/.zip-pass -s file:///home/user/sensitive \
-      -d zip:///home/user/sensitive.zip cp -r
+fmeld -E ~/.zip-pass -s ~/sensitive -d ~/sensitive.zip cp -r
 
 # Use an inline password (shows in shell history — testing only)
-fmeld -s file:///home/user/data \
-      -d 'zip:///home/user/data.zip?password=mysecret' cp -r
+fmeld -s ~/data -d 'zip:///home/user/data.zip?password=mysecret' cp -r
 
-# Use a compressed ZIP with maximum compression
-fmeld -s file:///home/user/logs \
-      -d 'zip:///home/user/logs.zip?compression=9' cp -r
+# Maximum compression
+fmeld -s ~/logs -d 'zip:///home/user/logs.zip?compression=9' cp -r
 ```
 
 Staging files are written beside the archive as `<archive>.staging.<token>/`. If the process is interrupted, the original archive is untouched and the staging directory is left on disk with a console warning. Orphan staging directories older than 24 hours are automatically removed on the next run.
@@ -523,23 +529,23 @@ The `clean` command deletes files that match your filters. By default it just re
 
 ```bash
 # Dry run: show what would be deleted from /tmp that is older than 1 day
-fmeld -s file:///tmp clean --before "1 day ago"
+fmeld -s /tmp clean --before "1 day ago"
 
 # Actually delete those files
-fmeld -s file:///tmp clean --before "1 day ago" --clean-files
+fmeld -s /tmp clean --before "1 day ago" --clean-files
 
 # Delete entire directories older than 7 days
-fmeld -s file:///var/archive clean --before "7 days ago" --clean-dirs
+fmeld -s /var/archive clean --before "7 days ago" --clean-dirs
 
 # Delete files and directories, recursing into sub-directories
 fmeld -s sftp://user@myserver.com/tmp clean --before "1 week ago" --clean-all -r
 
 # Delete log files larger than 100 MB
-fmeld -s file:///var/log clean --minsize 104857600 --clean-files --filter-files '\.log$'
+fmeld -s /var/log clean --minsize 100MB --clean-files --filter-files '\.log$'
 
 # Use a timestamp embedded in the file name instead of filesystem mtime
 # This regex captures a date like "2024-01-31" from names like "backup-2024-01-31.tar.gz"
-fmeld -s file:///backups clean \
+fmeld -s ~/backups clean \
       --before "30 days ago" \
       --fnametime '(\d{4}-\d{2}-\d{2})' \
       --clean-files
@@ -567,38 +573,40 @@ By default `dupes` opens an interactive terminal UI. Use `--session` to save pro
 
 ```bash
 # Scan a local directory for duplicates and review interactively
-fmeld -s file:///home/user/photos dupes -r
+fmeld -s ~/photos dupes -r
+
+# Scan a ZIP archive for internal duplicates
+fmeld -s ~/Backup/archive.zip dupes -r --session dupes.yml
 
 # Use a session file — scan once, resume review later
-fmeld -s file:///home/user/photos dupes -r --session ~/photos-dupes.yml
+fmeld -s ~/photos dupes -r --session ~/photos-dupes.yml
 
 # Resume an existing session (no rescan)
-fmeld -s file:///home/user/photos dupes --session ~/photos-dupes.yml
+fmeld -s ~/photos dupes --session ~/photos-dupes.yml
 
 # Detect duplicates by name only (fast, no hashing)
-fmeld -s file:///home/user/photos dupes -r --by name
+fmeld -s ~/photos dupes -r --by name
 
 # Pre-mark the newest file in each group as "keep" before reviewing
-fmeld -s file:///home/user/photos dupes -r --keep newest
+fmeld -s ~/photos dupes -r --keep newest
 
 # Auto-delete all non-kept files without interactive review
-fmeld -s file:///home/user/photos dupes -r \
+fmeld -s ~/photos dupes -r \
       --keep newest --remaining delete \
       --session ~/photos-dupes.yml --apply
 
 # Keep whichever copy lives under /archive/, delete the rest
-fmeld -s file:///home/user/photos dupes -r \
+fmeld -s ~/photos dupes -r \
       --keep regex --keep-pattern '/archive/' \
       --remaining delete --session ~/photos-dupes.yml --apply
 
 # Replace duplicates with hardlinks (saves disk space, local filesystem only)
-fmeld -s file:///home/user/photos dupes -r \
+fmeld -s ~/photos dupes -r \
       --keep newest --remaining link \
       --session ~/photos-dupes.yml --apply
 
 # Skip groups that still need a decision instead of failing (non-interactive)
-fmeld -s file:///home/user/photos dupes \
-      --session ~/photos-dupes.yml --apply --force
+fmeld -s ~/photos dupes --session ~/photos-dupes.yml --apply --force
 ```
 
 **Interactive UI key bindings:**
@@ -630,18 +638,18 @@ Applied and skipped groups are highlighted in the UI: the group title and a bann
 fmeld exports all of its connection types and helper functions so you can use them directly in your own Node.js code.
 
 ```javascript
-const path = require('path');
-const os   = require('os');
+const path  = require('path');
+const os    = require('os');
 const fmeld = require('fmeld');
 
 async function example()
 {
-    // Create connection objects
-    const ftp  = fmeld.getConnection('ftp://guest:guest@192.168.1.10/data', null, {verbose: true});
-    const local = fmeld.getConnection(`file://${path.join(os.tmpdir(), 'data')}`, null, {});
+    // Bare paths work just like in the CLI
+    const local = fmeld.getConnection(path.join(os.tmpdir(), 'data'), null, {});
+    const ftp   = fmeld.getConnection('ftp://guest:guest@192.168.1.10/data', null, {verbose: true});
 
     // Connect both
-    await Promise.all([ftp.connect(), local.connect()]);
+    await Promise.all([local.connect(), ftp.connect()]);
 
     // List remote files
     const files = await ftp.ls('/');
@@ -668,7 +676,7 @@ example().catch(console.error);
 ```javascript
 const fmeld = require('fmeld');
 
-fmeld.getConnection(url, credFile, opts)  // Create a backend client from a URL
+fmeld.getConnection(url, credFile, opts)  // Create a backend client from a URL or bare path
 fmeld.copyFile(src, dst, from, to, size, opts)  // Copy a single file
 fmeld.copyDir(src, dst, from, to, opts)         // Copy a directory
 fmeld.syncDir(src, dst, from, to, opts)         // Sync two directories
@@ -698,7 +706,7 @@ fmeld.boxClient(args, opts)
 fmeld.adbClient(args, opts)
 
 // Backend registry and optional-dependency helpers
-fmeld.setup.BACKENDS               // Array of backend descriptors (key, label, pkgs, size, schemes)
+fmeld.setup.BACKENDS               // Array of backend descriptors (key, label, pkgs, size, schemes, extensions)
 fmeld.setup.pkgAvailable(name)     // Returns true if an npm package is installed
 fmeld.setup.requireBackend(pkg, hint)  // require() with a typed BACKEND_NOT_INSTALLED error
 fmeld.setup.getBackendByPkg(pkg)   // Look up a backend descriptor by package name
@@ -719,6 +727,8 @@ client.createWriteStream(path)    // Returns Promise<WritableStream>
 client.makePath(suffix)           // Returns the full path string
 client.getPrefix(suffix)          // Returns the URL prefix string
 client.isConnected()              // Returns boolean
+// Backends that use staging (e.g. zip://) also expose:
+client.abort()                    // Returns Promise — discard staged changes, leave original untouched
 ```
 
 &nbsp;
@@ -747,7 +757,7 @@ Pass the file with `-S` (source) or `-E` (destination):
 
 ```bash
 fmeld -S ./s3-creds.json -s s3://my-bucket/backups ls
-fmeld -S ./s3-creds.json -s file:///home/user/data -d s3://my-bucket/data cp -r
+fmeld -S ./s3-creds.json -s ~/data -d s3://my-bucket/data cp -r
 ```
 
 **Option 2 — Environment variables** (no credential file needed)
@@ -841,7 +851,7 @@ fmeld -S ./webdav-pass.txt -s webdavs://alice@nextcloud.example.com/remote.php/d
 
 # Sync local to Nextcloud
 fmeld -S ./webdav-pass.txt \
-      -s file:///home/alice/documents \
+      -s ~/documents \
       -d webdavs://alice@nextcloud.example.com/remote.php/dav/files/alice/documents \
       sync -Ur
 ```
@@ -885,8 +895,8 @@ The URL hostname is the **container name**; the path is an optional blob prefix:
 
 ```bash
 fmeld -S ./azure-creds.json -s azure://my-container/backups ls
-fmeld -S ./azure-creds.json -s file:///home/user/data -d azure://my-container/data cp -r
-fmeld -S ./azure-creds.json -s azure://my-container/data -d file:///home/user/data sync -Dr
+fmeld -S ./azure-creds.json -s ~/data -d azure://my-container/data cp -r
+fmeld -S ./azure-creds.json -s azure://my-container/data -d ~/data sync -Dr
 ```
 
 &nbsp;
@@ -912,7 +922,7 @@ On the first run, fmeld will print an authorization URL. After you log in and gr
 
 ```bash
 fmeld -S ./onedrive-creds.json -s onedrive://Documents/backups ls
-fmeld -S ./onedrive-creds.json -s file:///home/user/docs -d onedrive://Documents/docs sync -Ur
+fmeld -S ./onedrive-creds.json -s ~/docs -d onedrive://Documents/docs sync -Ur
 ```
 
 To force re-authentication:
@@ -942,7 +952,7 @@ The first path component after the hostname is always the **share name**. Any re
 fmeld -s smb://alice:s3cr3t@nas.local/documents ls
 
 # Sync local → share
-fmeld -s file:///home/alice/docs -d smb://alice:s3cr3t@nas.local/documents sync -Ur
+fmeld -s ~/docs -d smb://alice:s3cr3t@nas.local/documents sync -Ur
 
 # Include a Windows domain (two equivalent forms)
 fmeld -s 'smb://CORP;alice:s3cr3t@fileserver.corp.local/shared/reports' ls
@@ -952,8 +962,7 @@ fmeld -s 'smb://alice:s3cr3t@fileserver.corp.local/shared/reports?domain=CORP' l
 fmeld -S /run/secrets/smb-pass -s smb://alice@nas.local/backups ls
 
 # Copy from a Windows share to local
-fmeld -s smb://alice:s3cr3t@winserver/myshare/exports \
-      -d file:///home/alice/exports cp -r
+fmeld -s smb://alice:s3cr3t@winserver/myshare/exports -d ~/exports cp -r
 ```
 
 The password file (passed with `-S` / `-E`) should contain only the password on a single line.
@@ -993,7 +1002,7 @@ fmeld -S ./box-app-config.json -s box:///My Folder ls
 
 ```bash
 fmeld -S ./box-dev-token.json -s box:///My Folder ls
-fmeld -S ./box-dev-token.json -s file:///home/user/docs -d box:///Documents sync -Ur
+fmeld -S ./box-dev-token.json -s ~/docs -d box:///Documents sync -Ur
 ```
 
 The URL path is the folder tree within Box. The root maps to the top of the authenticated account.
@@ -1026,14 +1035,13 @@ The serial number of connected devices can be found with `adb devices`.
 fmeld -s adb:///sdcard/DCIM/ ls
 
 # Copy photos from a specific device to local
-fmeld -s adb://R58M123ABCD/sdcard/DCIM/Camera -d file:///home/user/photos cp -r
+fmeld -s adb://R58M123ABCD/sdcard/DCIM/Camera -d ~/photos cp -r
 
 # Sync from a TCP/IP connected device
-fmeld -s adb://192.168.1.100:5555/sdcard/Documents \
-      -d file:///home/user/android-docs sync -Dr
+fmeld -s adb://192.168.1.100:5555/sdcard/Documents -d ~/android-docs sync -Dr
 
 # Upload files to the device
-fmeld -s file:///home/user/music -d adb:///sdcard/Music cp -r
+fmeld -s ~/music -d adb:///sdcard/Music cp -r
 ```
 
 &nbsp;
@@ -1068,20 +1076,20 @@ MIT — see [LICENSE](LICENSE)
 
 ## Alternatives
 
-| Project | Language / Runtime | Type | Backends | License | Maturity |
+| Project | Language / Runtime | Type | Backends | Notable features | License |
 |---|---|---|---|---|---|
-| **[rclone](https://github.com/rclone/rclone)** | Go (static binary) | CLI + HTTP API | ~70+ | MIT | Very high — 10+ years, widely deployed |
-| **[Cyberduck / duck](https://github.com/iterate-ch/cyberduck)** | Java | GUI + CLI | ~30 | GPL v3 | High — 20+ years |
-| **[lftp](https://github.com/lavv17/lftp)** | C++ | CLI | ~10 | GPL v3 | High — 25+ years |
-| **[Flysystem](https://github.com/thephpleague/flysystem)** | PHP | Library | ~15 (via adapters) | MIT | High — 10+ years |
-| **[Apache Commons VFS](https://commons.apache.org/proper/commons-vfs/)** | Java | Library | ~15 | Apache 2.0 | High — 20+ years |
-| **fmeld** | Node.js | CLI + Library | 15 | MIT | Early-stage |
+| **[rclone](https://github.com/rclone/rclone)** | Go (static binary) | CLI + HTTP API | 70+ | Widest backend coverage, battle-tested, no runtime dep | MIT |
+| **[Cyberduck / duck](https://github.com/iterate-ch/cyberduck)** | Java | GUI + CLI | ~30 | Desktop GUI, bookmarks, drag-and-drop | GPL v3 |
+| **[lftp](https://github.com/lavv17/lftp)** | C++ | CLI | ~10 | Parallel transfers, resumable, rich scripting language | GPL v3 |
+| **[Flysystem](https://github.com/thephpleague/flysystem)** | PHP | Library | ~15 | Uniform API for PHP apps, community adapters | MIT |
+| **[Apache Commons VFS](https://commons.apache.org/proper/commons-vfs/)** | Java | Library | ~15 | Standard Java VFS abstraction, Apache ecosystem | Apache 2.0 |
+| **fmeld** | Node.js | CLI + Library | 15 | ZIP archives as virtual directories, interactive dedup UI, embeddable in JS apps | MIT |
 
 &nbsp;
 
 ### rclone
 
-rclone is the most widely used tool in this category. It supports more backends than any other project listed here and has a large community, extensive documentation, and years of production use. It ships as a single static binary with no runtime dependency. Choose rclone when you need the broadest backend coverage, are working in a polyglot or shell-scripting environment, or need a tool you can drop onto any machine without installing a runtime.
+rclone is the most widely used tool in this category. It supports more backends than any other project listed here, ships as a single static binary with no runtime dependency, and has years of production use behind it. Choose rclone when you need the broadest possible backend coverage, are working in a polyglot or shell-scripting environment, or need something you can drop onto any machine without installing a runtime.
 
 ### Cyberduck / duck
 
@@ -1101,7 +1109,9 @@ Apache Commons VFS is a Java library that exposes a virtual filesystem API over 
 
 ### fmeld
 
-fmeld is a Node.js package that exposes both a CLI and a programmatic library API. It covers common cloud and server backends, installs optional backends on demand, and is designed to be embedded directly in Node.js applications. Choose fmeld when you are building a Node.js application that needs to transfer or sync files across multiple storage backends from within the same process, without shelling out to an external binary.
+fmeld is a Node.js package with a CLI and a library API. It requires Node.js and is early-stage compared to the others listed here. Backend coverage is narrower than rclone, there is no static binary, and it has a much smaller community and track record.
+
+It differs from the others in a few specific ways: local paths can be passed without a `file://` prefix; `.zip` files are treated as a mountable backend rather than just a transfer target; and there is a built-in interactive UI for finding and resolving duplicate files. The library API exposes each backend as an object with a uniform interface, which can be useful when embedding file operations in a Node.js application.
 
 &nbsp;
 
