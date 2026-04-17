@@ -1111,7 +1111,7 @@ Apache Commons VFS is a Java library that exposes a virtual filesystem API over 
 
 fmeld is a Node.js package with a CLI and a library API. It requires Node.js and is early-stage compared to the others listed here. Backend coverage is narrower than rclone, there is no static binary, and it has a much smaller community and track record.
 
-It differs from the others in a few specific ways: local paths can be passed without a `file://` prefix; `.zip` files are treated as a mountable backend rather than just a transfer target; and there is a built-in interactive UI for finding and resolving duplicate files. The library API exposes each backend as an object with a uniform interface, which can be useful when embedding file operations in a Node.js application.
+It differs from the others in a few specific ways: `.zip` files are treated as a mountable backend rather than just a transfer target; and there is a built-in interactive UI for finding and resolving duplicate files. The library API exposes each backend as an object with a uniform interface, which can be useful when embedding file operations in a Node.js application.
 
 &nbsp;
 
