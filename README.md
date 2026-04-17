@@ -34,6 +34,7 @@ fmeld -s file:///tmp clean --before "1 day ago" --clean-all
   - [Sync files](#sync-files)
   - [Make / remove directories](#make--remove-directories)
   - [Clean old files](#clean-old-files)
+  - [Find and remove duplicates](#find-and-remove-duplicates)
 - [Using as a library](#using-as-a-library)
 - [Testing](#testing)
 - [Setting up cloud credentials](#setting-up-cloud-credentials)
@@ -190,6 +191,7 @@ For cloud services (Google Drive, Dropbox, GCS), `-S` / `-E` should point to the
 | `rm` | Remove a directory at the source path |
 | `unlink` | Remove a single file at the source path |
 | `clean` | Delete files matching age / size / name filters |
+| `dupes` | Find duplicate files and interactively review / delete / hardlink them |
 | `setup` | Interactively install optional backend packages |
 
 Multiple commands can be chained in a single invocation and will run in sequence.
@@ -201,7 +203,7 @@ Multiple commands can be chained in a single invocation and will run in sequence
 ## Options reference
 
 ```
-fmeld [options] [ls|cp|sync|md|rm|unlink|clean]
+fmeld [options] [ls|cp|sync|md|rm|unlink|clean|dupes]
 
  --- SOURCE / DESTINATION ---
 
@@ -244,6 +246,42 @@ fmeld [options] [ls|cp|sync|md|rm|unlink|clean]
                           delete — omitting this lets you do a dry run)
     --clean-dirs          Delete directories when cleaning
     --clean-all           Delete both files and directories
+
+ --- DUPES ---
+
+    --by            [arg]  Duplicate detection mode (default: sha256)
+                           name          — same filename (case-insensitive, NFC)
+                           name,size     — same filename AND size
+                           md5           — MD5 content hash (uses backend metadata
+                                          where available: GDrive, GCS)
+                           sha1          — SHA-1 content hash
+                           sha256        — SHA-256 content hash
+    --session       [arg]  Path to a YAML session file. Saves scan results so you
+                           can review and apply in separate steps. If the file
+                           already exists the scan is skipped and the session is
+                           loaded directly.
+    --apply                Apply the session non-interactively (requires --session).
+                           Blocked if any group is still marked "review".
+    --force                With --apply: skip blocked groups instead of failing.
+    --keep          [arg]  Pre-populate keep decisions before review or apply:
+                           first         — keep the file that appears first in the
+                                          scan order
+                           newest        — keep the file with the latest mtime
+                           oldest        — keep the file with the earliest mtime
+                           shortest-path — keep the file with the shortest full path
+                           longest-path  — keep the file with the longest full path
+                           regex         — keep the first file whose path matches
+                                          --keep-pattern
+    --keep-pattern  [arg]  Regex used when --keep regex is set.
+    --remaining     [arg]  Action for non-kept files when --keep is set:
+                           review (default) — leave them for interactive review
+                           delete           — mark them for deletion
+                           link             — replace them with hardlinks (file://
+                                            backend only)
+    --force-preset         Re-apply preset even when a group already has decisions
+                           from a previously loaded session.
+    --include-empty        Include zero-byte files in duplicate detection (they are
+                           excluded by default).
 
  --- OUTPUT ---
 
@@ -505,6 +543,79 @@ fmeld -s file:///backups clean \
 
 ---
 
+### Find and remove duplicates
+
+The `dupes` command scans a source for duplicate files and lets you decide what to do with each group — keep one copy, delete the rest, or replace duplicates with hardlinks to save space.
+
+By default `dupes` opens an interactive terminal UI. Use `--session` to save progress between sessions.
+
+**Detection modes** (`--by`):
+
+| Mode | What it compares |
+|---|---|
+| `sha256` (default) | SHA-256 content hash — most accurate |
+| `sha1` | SHA-1 content hash |
+| `md5` | MD5 content hash (uses backend metadata on GDrive / GCS) |
+| `name` | Filename only (case-insensitive, Unicode-normalized) |
+| `name,size` | Filename AND size — faster than hashing |
+
+```bash
+# Scan a local directory for duplicates and review interactively
+fmeld -s file:///home/user/photos dupes -r
+
+# Use a session file — scan once, resume review later
+fmeld -s file:///home/user/photos dupes -r --session ~/photos-dupes.yml
+
+# Resume an existing session (no rescan)
+fmeld -s file:///home/user/photos dupes --session ~/photos-dupes.yml
+
+# Detect duplicates by name only (fast, no hashing)
+fmeld -s file:///home/user/photos dupes -r --by name
+
+# Pre-mark the newest file in each group as "keep" before reviewing
+fmeld -s file:///home/user/photos dupes -r --keep newest
+
+# Auto-delete all non-kept files without interactive review
+fmeld -s file:///home/user/photos dupes -r \
+      --keep newest --remaining delete \
+      --session ~/photos-dupes.yml --apply
+
+# Keep whichever copy lives under /archive/, delete the rest
+fmeld -s file:///home/user/photos dupes -r \
+      --keep regex --keep-pattern '/archive/' \
+      --remaining delete --session ~/photos-dupes.yml --apply
+
+# Replace duplicates with hardlinks (saves disk space, local filesystem only)
+fmeld -s file:///home/user/photos dupes -r \
+      --keep newest --remaining link \
+      --session ~/photos-dupes.yml --apply
+
+# Skip groups that still need a decision instead of failing (non-interactive)
+fmeld -s file:///home/user/photos dupes \
+      --session ~/photos-dupes.yml --apply --force
+```
+
+**Interactive UI key bindings:**
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Move between files in a group |
+| `←` / `→` | Move between duplicate groups |
+| `k` | Mark current file as **keep** |
+| `d` | Mark current file as **delete** |
+| `l` | Mark current file as **link** (hardlink, local only) |
+| `r` | Mark current file as **review** (clear decision) |
+| `n` | Mark current file as **none** (no action) |
+| `s` | Save session to current file |
+| `S` | Save session to a new file (prompts for path) |
+| `a` | Apply decisions (shows confirmation screen first) |
+| `R` | Rescan source and carry forward existing decisions |
+| `q` | Quit |
+
+&nbsp;
+
+---
+
 ## Using as a library
 
 fmeld exports all of its connection types and helper functions so you can use them directly in your own Node.js code.
@@ -553,6 +664,10 @@ fmeld.copyFile(src, dst, from, to, size, opts)  // Copy a single file
 fmeld.copyDir(src, dst, from, to, opts)         // Copy a directory
 fmeld.syncDir(src, dst, from, to, opts)         // Sync two directories
 fmeld.cleanDir(src, from, opts)                 // Clean a directory
+fmeld.findDuplicates(src, from, opts)           // Scan for duplicate files; returns Promise<sessionData>
+fmeld.dupeSession                               // Session helpers: loadSession, saveSession, applyPreset,
+                                                //   validateGroup, applySession, carryForward
+fmeld.dupeUI                                    // Interactive terminal review UI: runInteractive(state)
 fmeld.stdoutProgress(args, opts)                // Built-in progress reporter
 fmeld.toHuman(bytes)                            // Format bytes as "1.23 MB" etc.
 
@@ -924,7 +1039,7 @@ The test suite uses the built-in [`node:test`](https://nodejs.org/api/test.html)
 node --test test/test.js
 ```
 
-Tests cover `toHuman`, `promiseWhile`/`promiseWhileBatch`, `parseParams`, `getConnection` protocol dispatch, all client constructors, `copyDir`, `syncDir`, `cleanDir`, and `loadConfig`. Filesystem tests create and clean up their own temporary directories under `os.tmpdir()`.
+Tests cover `toHuman`, `promiseWhile`/`promiseWhileBatch`, `parseParams`, `getConnection` protocol dispatch, all client constructors, `copyDir`, `syncDir`, `cleanDir`, `loadConfig`, and the `dupes` command (`normalizeFileName`, `findDuplicates`, `applyPreset`, `validateGroup`, `carryForward`, session save/load round-trips, and `applySession` including delete and hardlink). Filesystem tests create and clean up their own temporary directories under `os.tmpdir()`.
 
 For a Docker-based live smoke test against real protocol servers, run:
 

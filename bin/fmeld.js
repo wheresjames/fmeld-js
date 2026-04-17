@@ -225,6 +225,150 @@ function nextCommand(_p)
                                             });
                         });
 
+                case 'dupes':
+                    return isReady(_p, cmd, true, false)
+                        .then(() =>
+                        {
+                            // ── Validate option constraints ──────────────────
+                            if (_p.apply && !_p.session)
+                                throw '--apply requires --session';
+                            if (_p.remaining && !_p.keep)
+                                throw '--remaining requires --keep';
+                            if (_p.keep === 'regex' && !_p['keep-pattern'])
+                                throw '--keep regex requires --keep-pattern';
+
+                            const isFileBk = _p.source && _p.source.startsWith('file:');
+                            if (_p.remaining === 'link' && !isFileBk)
+                                throw '--remaining link is only supported for file:// backends';
+
+                            const Session       = fmeld.dupeSession;
+                            const UI            = fmeld.dupeUI;
+                            const findDuplicates = fmeld.findDuplicates;
+
+                            const minsize = _p.minsize != null ? parseInt(_p.minsize) : null;
+                            const maxsize = _p.maxsize != null ? parseInt(_p.maxsize) : null;
+
+                            const scanOpts = {
+                                by:           _p.by           || 'sha256',
+                                recursive:    _p.recursive    ? true : false,
+                                includeEmpty: _p['include-empty'] ? true : false,
+                                before:       _p.before       || null,
+                                after:        _p.after        || null,
+                                minsize:      minsize,
+                                maxsize:      maxsize,
+                                fnametime:    _p.fnametime    || null,
+                                filterFiles:  _p['filter-files'] || '',
+                                filterDirs:   _p['filter-dirs']  || '',
+                                batch:        _p.batch        || 1,
+                                sessionFile:  _p.session      || null,
+                                temporary:    !_p.session,
+                            };
+
+                            const presetOpts = {
+                                keep:        _p.keep          || null,
+                                keepPattern: _p['keep-pattern'] || null,
+                                remaining:   _p.remaining     || null,
+                                forcePreset: _p['force-preset'] ? true : false,
+                            };
+
+                            // ── Helper: print non-interactive apply summary ──
+                            function printApplySummary(sessionData) {
+                                const { validateGroup } = Session;
+                                let toDelete = 0, toLink = 0, noEffect = 0;
+                                let reclaimable = sessionData.summary.reclaimable_bytes || 0;
+                                for (const e of sessionData.entries || []) {
+                                    if (e.result === 'applied') continue;
+                                    if (!validateGroup(e).valid) { noEffect++; continue; }
+                                    for (const f of e.files) {
+                                        if (f.action === 'delete') toDelete++;
+                                        if (f.action === 'link')   toLink++;
+                                    }
+                                }
+                                Log(`\n  Files to delete:    ${toDelete}`);
+                                Log(`  Files to link:      ${toLink}`);
+                                Log(`  Reclaimable:        ${fmeld.toHuman(reclaimable)}`);
+                                Log(`  Groups to skip:     ${noEffect}`);
+                                Log(`  Session file:       ${sessionData.session.path}\n`);
+                            }
+
+                            // ── Helper: non-interactive apply ────────────────
+                            function runApply(sessionData) {
+                                printApplySummary(sessionData);
+                                return Session.applySession(_p.src, sessionData,
+                                    { force: _p.force ? true : false, isFileBk })
+                                    .then(result => {
+                                        Log(`Applied: ${result.applied}  Skipped: ${result.skipped}  Failed: ${result.failed}`);
+                                        if (_p.session)
+                                            Session.saveSession(sessionData, _p.session);
+                                        if (result.failed > 0 && !_p.force)
+                                            throw `Apply completed with ${result.failed} failure(s).`;
+                                    });
+                            }
+
+                            // ── Helper: interactive flow ─────────────────────
+                            function runUI(sessionData, sessionFile, isTemp) {
+                                return UI.runInteractive({
+                                    sessionData,
+                                    sessionFile,
+                                    isTemp,
+                                    src:      _p.src,
+                                    scanOpts,
+                                    isFileBk,
+                                });
+                            }
+
+                            // ── Main flow ────────────────────────────────────
+
+                            // Case 1: session file exists → load it
+                            if (_p.session && fs.existsSync(_p.session)) {
+                                let sessionData = Session.loadSession(_p.session);
+
+                                // Merge CLI scan options (CLI takes precedence)
+                                if (_p.by)            sessionData.mode               = _p.by;
+                                if (_p.recursive)     sessionData.scan.recursive     = true;
+                                if (_p['include-empty']) sessionData.scan.include_empty = true;
+                                if (_p.before)        sessionData.scan.before        = _p.before;
+                                if (_p.after)         sessionData.scan.after         = _p.after;
+                                if (minsize != null)  sessionData.scan.minsize       = minsize;
+                                if (maxsize != null)  sessionData.scan.maxsize       = maxsize;
+                                if (_p.fnametime)     sessionData.scan.fnametime     = _p.fnametime;
+                                if (_p['filter-files']) sessionData.scan.filter_files = _p['filter-files'];
+                                if (_p['filter-dirs'])  sessionData.scan.filter_dirs  = _p['filter-dirs'];
+
+                                if (presetOpts.keep)
+                                    sessionData = Session.applyPreset(sessionData, presetOpts);
+
+                                if (_p.apply)
+                                    return runApply(sessionData);
+                                return runUI(sessionData, _p.session, false);
+                            }
+
+                            // Case 2: no existing session → scan
+                            return findDuplicates(_p.src, _p.src.makePath(), scanOpts)
+                                .then(sessionData => {
+                                    if (presetOpts.keep)
+                                        sessionData = Session.applyPreset(sessionData, presetOpts);
+
+                                    const sessionFile = _p.session || Session.makeTempPath();
+                                    sessionData.session.path      = sessionFile;
+                                    sessionData.session.temporary = !_p.session;
+                                    Session.saveSession(sessionData, sessionFile);
+
+                                    if (_p.apply)
+                                        return runApply(sessionData);
+
+                                    // Interactive: if a session file was specified but didn't
+                                    // exist before, prompt whether to enter review or exit.
+                                    if (_p.session) {
+                                        Log(`\nSession saved to: ${sessionFile}`);
+                                        Log(`Found ${sessionData.summary.groups} group(s) across ${sessionData.summary.files} file(s).`);
+                                        return runUI(sessionData, sessionFile, false);
+                                    }
+
+                                    return runUI(sessionData, sessionFile, true);
+                                });
+                        });
+
                         default:
                     _p.cmds.shift();
                     throw `Unknown command ${cmd}`;
@@ -447,7 +591,7 @@ function promptInstall(pkg, allPkgs, hint)
 function main()
 {
     // Parse command line
-    let _p = fmeld.__config__.parseParams('fmeld [options] [ls|cp|sync|md|rm|unlink|clean]', process.argv,
+    let _p = fmeld.__config__.parseParams('fmeld [options] [ls|cp|sync|md|rm|unlink|clean|dupes]', process.argv,
         [   ['s', 'source=',        'Source URL'],
             ['S', 'source-cred=',   'Source Credentials.  Can be file / dir / environment variable'],
             ['d', 'dest=',          'Destination URL'],
@@ -476,6 +620,15 @@ function main()
             ['',  'clean-files',    'Files should be deleted while cleaning'],
             ['',  'clean-dirs',     'Directories should be deleted while cleaning'],
             ['',  'clean-all',      'Files and directories should be deleted while cleaning'],
+            ['',  'by=',            'Duplicate detection mode: name|name,size|md5|sha1|sha256 (default: sha256)'],
+            ['',  'session=',       'Session file path for dupes command'],
+            ['',  'apply',          'Apply a session file non-interactively (requires --session)'],
+            ['',  'force',          'With --apply: skip blocking groups instead of failing'],
+            ['',  'keep=',          'Preset keep rule: first|newest|oldest|shortest-path|longest-path|regex'],
+            ['',  'keep-pattern=',  'Regex pattern used when --keep regex is set'],
+            ['',  'remaining=',     'Action for non-kept files in preset: delete|link|review (default: review)'],
+            ['',  'force-preset',   'Overwrite existing decisions when applying a preset to a loaded session'],
+            ['',  'include-empty',  'Include zero-byte files in duplicate detection'],
             ['v', 'version',        'Show version'],
             ['V', 'verbose',        'Verbose logging']
         ]);
