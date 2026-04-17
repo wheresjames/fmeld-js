@@ -7,4 +7,4 @@ if [ -z "$(ls -A /srv/data 2>/dev/null)" ]; then
     cp -a /seed/. /srv/data/
 fi
 
-exec python /usr/local/bin/ftp-server.py
+exec python3 /usr/local/bin/ftp-server.py

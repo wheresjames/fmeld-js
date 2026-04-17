@@ -1,12 +1,10 @@
-FROM python:3.11-slim
+FROM debian:stable-slim
 
 WORKDIR /srv
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends netcat-openbsd \
+    && apt-get install -y --no-install-recommends python3 python3-pyftpdlib netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --no-cache-dir pyftpdlib
 
 COPY docker/live-test/fixtures/share/ /seed/
 COPY docker/live-test/ftp-server.py /usr/local/bin/ftp-server.py
