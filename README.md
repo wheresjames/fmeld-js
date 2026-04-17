@@ -234,8 +234,8 @@ fmeld [options] [ls|cp|sync|md|rm|unlink|clean|dupes]
     --before       [arg]  Only match files modified before this time
                           Accepts natural language: "1 day ago", "last Friday"
     --after        [arg]  Only match files modified after this time
-    --minsize      [arg]  Minimum file size in bytes (clean command)
-    --maxsize      [arg]  Maximum file size in bytes (clean command)
+    --minsize      [arg]  Minimum file size: bytes or unit string (10MB, 1.5GiB, …)
+    --maxsize      [arg]  Maximum file size: bytes or unit string (10MB, 1.5GiB, …)
     --fnametime    [arg]  Regex to extract a timestamp from the file name
                           rather than using filesystem mtime.
                           Example: ([0-9]{4}-[0-9]{2}-[0-9]{2})

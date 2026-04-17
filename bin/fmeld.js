@@ -217,8 +217,8 @@ function nextCommand(_p)
                                                 fnametime       : _p.fnametime,
                                                 'clean-files'   : _p['clean-files'],
                                                 'clean-dirs'    : _p['clean-dirs'],
-                                                minsize         : _p.minsize,
-                                                maxsize         : _p.maxsize,
+                                                minsize         : fmeld.parseSize(_p.minsize),
+                                                maxsize         : fmeld.parseSize(_p.maxsize),
                                                 batch           : _p.batch,
                                                 less            : _p.less ? true : false,
                                                 verbose         : _p.verbose ? true : false
@@ -245,8 +245,8 @@ function nextCommand(_p)
                             const UI            = fmeld.dupeUI;
                             const findDuplicates = fmeld.findDuplicates;
 
-                            const minsize = _p.minsize != null ? parseInt(_p.minsize) : null;
-                            const maxsize = _p.maxsize != null ? parseInt(_p.maxsize) : null;
+                            const minsize = fmeld.parseSize(_p.minsize);
+                            const maxsize = fmeld.parseSize(_p.maxsize);
 
                             const scanOpts = {
                                 by:           _p.by           || 'sha256',
@@ -614,8 +614,8 @@ function main()
             ['b', 'batch=',         'How many concurrent opererations to allow, default is 1'],
             ['',  'before=',        'Show files before this timestamp'],
             ['',  'after=',         'Show files after this timestamp'],
-            ['',  'minsize=',       'Minimum file size for cleaning'],
-            ['',  'maxsize=',       'Maximum file size for cleaning'],
+            ['',  'minsize=',       'Minimum file size: bytes or unit string (10MB, 1.5GiB, …)'],
+            ['',  'maxsize=',       'Maximum file size: bytes or unit string (10MB, 1.5GiB, …)'],
             ['',  'fnametime=',     'Regex that extracts the file or directory time from the name, Ex: [^/]+$'],
             ['',  'clean-files',    'Files should be deleted while cleaning'],
             ['',  'clean-dirs',     'Directories should be deleted while cleaning'],

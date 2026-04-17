@@ -118,6 +118,31 @@ describe('toHuman', () =>
 });
 
 // ---------------------------------------------------------------------------
+// parseSize
+// ---------------------------------------------------------------------------
+
+describe('parseSize', () =>
+{
+    test('plain integer string', () => { assert.strictEqual(fmeld.parseSize('1024'), 1024); });
+    test('bare number passes through', () => { assert.strictEqual(fmeld.parseSize(512), 512); });
+    test('null returns null', () => { assert.strictEqual(fmeld.parseSize(null), null); });
+    test('empty string returns null', () => { assert.strictEqual(fmeld.parseSize(''), null); });
+    test('B suffix', () => { assert.strictEqual(fmeld.parseSize('500B'), 500); });
+    test('KB (SI)', () => { assert.strictEqual(fmeld.parseSize('10KB'), 10_000); });
+    test('MB (SI)', () => { assert.strictEqual(fmeld.parseSize('10MB'), 10_000_000); });
+    test('GB (SI)', () => { assert.strictEqual(fmeld.parseSize('1GB'), 1_000_000_000); });
+    test('TB (SI)', () => { assert.strictEqual(fmeld.parseSize('2TB'), 2_000_000_000_000); });
+    test('KiB (IEC)', () => { assert.strictEqual(fmeld.parseSize('1KiB'), 1024); });
+    test('MiB (IEC)', () => { assert.strictEqual(fmeld.parseSize('1MiB'), 1048576); });
+    test('GiB (IEC)', () => { assert.strictEqual(fmeld.parseSize('1GiB'), 1073741824); });
+    test('case-insensitive unit', () => { assert.strictEqual(fmeld.parseSize('5mb'), 5_000_000); });
+    test('decimal value', () => { assert.strictEqual(fmeld.parseSize('1.5MB'), 1_500_000); });
+    test('space between number and unit', () => { assert.strictEqual(fmeld.parseSize('2 GB'), 2_000_000_000); });
+    test('unknown unit throws', () => { assert.throws(() => fmeld.parseSize('10XB'), /Unknown size unit/); });
+    test('non-numeric input throws', () => { assert.throws(() => fmeld.parseSize('abc'), /Invalid size/); });
+});
+
+// ---------------------------------------------------------------------------
 // promiseWhile / promiseWhileBatch
 // ---------------------------------------------------------------------------
 
@@ -2340,7 +2365,7 @@ describe('fmeld exports', () =>
 {
     const functions = [
         'getConnection', 'stdoutProgress', 'copyFile', 'copyDir',
-        'cleanDir', 'syncDir', 'promiseWhile', 'promiseWhileBatch', 'toHuman',
+        'cleanDir', 'syncDir', 'promiseWhile', 'promiseWhileBatch', 'toHuman', 'parseSize',
         'findDuplicates',
     ];
     const constructors = [
