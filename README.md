@@ -207,10 +207,14 @@ fmeld [options] [ls|cp|sync|md|rm|unlink|clean|dupes]
 
  --- SOURCE / DESTINATION ---
 
- -s --source       [arg]  Source URL
+ -s --source       [arg]  Source URL or local path. Bare paths are automatically
+                          treated as file:// — /abs, ./rel, ../rel, and ~/home
+                          all work without a scheme prefix. Paths with a recognised
+                          file extension are further routed to the matching backend
+                          (e.g. archive.zip → zip://).
  -S --source-cred  [arg]  Source credentials: path to a file, directory, or
                           an environment variable name (prefix with $)
- -d --dest         [arg]  Destination URL
+ -d --dest         [arg]  Destination URL or local path (same path expansion as --source)
  -E --dest-cred    [arg]  Destination credentials (same formats as --source-cred)
  -c --cred-root    [arg]  Shared credentials root directory or env variable.
                           fmeld searches here for a file matching the hostname.
@@ -261,7 +265,9 @@ fmeld [options] [ls|cp|sync|md|rm|unlink|clean|dupes]
                            already exists the scan is skipped and the session is
                            loaded directly.
     --apply                Apply the session non-interactively (requires --session).
-                           Blocked if any group is still marked "review".
+                           Blocked if any group is still marked "review" or has a
+                           link action without a keep. Groups where every file is
+                           "none" are silently skipped.
     --force                With --apply: skip blocked groups instead of failing.
     --keep          [arg]  Pre-populate keep decisions before review or apply:
                            first         — keep the file that appears first in the
@@ -610,7 +616,10 @@ fmeld -s file:///home/user/photos dupes \
 | `S` | Save session to a new file (prompts for path) |
 | `a` | Apply decisions (shows confirmation screen first) |
 | `R` | Rescan source and carry forward existing decisions |
+| `A` | **Abort** — discard all staged changes and restore the source to its original state (only shown for backends that support staged writes, e.g. `zip://`) |
 | `q` | Quit |
+
+Applied and skipped groups are highlighted in the UI: the group title and a banner line are colored (green for applied, yellow for skipped, red for failed), all file rows are dimmed, and a progress bar at the bottom shows the status of every group at a glance. Each bar segment is colored by the state of the groups it covers — green (applied), yellow (skipped), red (failed), or dim (pending) — so you can immediately see where unresolved groups are. Your current position is marked with a bold block in the bar.
 
 &nbsp;
 
@@ -1039,7 +1048,7 @@ The test suite uses the built-in [`node:test`](https://nodejs.org/api/test.html)
 node --test test/test.js
 ```
 
-Tests cover `toHuman`, `promiseWhile`/`promiseWhileBatch`, `parseParams`, `getConnection` protocol dispatch, all client constructors, `copyDir`, `syncDir`, `cleanDir`, `loadConfig`, and the `dupes` command (`normalizeFileName`, `findDuplicates`, `applyPreset`, `validateGroup`, `carryForward`, session save/load round-trips, and `applySession` including delete and hardlink). Filesystem tests create and clean up their own temporary directories under `os.tmpdir()`.
+Tests cover `toHuman`, `promiseWhile`/`promiseWhileBatch`, `parseParams`, `getConnection` protocol dispatch (including bare-path expansion and extension-based routing), all client constructors, `copyDir`, `syncDir`, `cleanDir`, `loadConfig`, and the `dupes` command (`normalizeFileName`, `findDuplicates`, `applyPreset`, `validateGroup`, `carryForward`, session save/load round-trips, and `applySession` including delete, hardlink, all-none auto-skip, and force-skip). The `zip://` backend is covered including writes, deletes, directory operations, orphan cleanup, and `abort()`. Filesystem tests create and clean up their own temporary directories under `os.tmpdir()`.
 
 For a Docker-based live smoke test against real protocol servers, run:
 

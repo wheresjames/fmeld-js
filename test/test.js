@@ -343,6 +343,76 @@ describe('getConnection', () =>
         }
     });
 
+    test('absolute path is treated as file://', () =>
+    {
+        const client = fmeld.getConnection('/tmp/fmeld-test', null, {verbose: false});
+        assert.ok(client instanceof fmeld.fileClient);
+        assert.equal(client.makePath(), '/tmp/fmeld-test');
+    });
+
+    test('relative ./path is resolved to an absolute file://', () =>
+    {
+        const client = fmeld.getConnection('./some/dir', null, {verbose: false});
+        assert.ok(client instanceof fmeld.fileClient);
+        assert.equal(client.makePath(), path.resolve('./some/dir'));
+    });
+
+    test('../path is resolved to an absolute file://', () =>
+    {
+        const client = fmeld.getConnection('../other', null, {verbose: false});
+        assert.ok(client instanceof fmeld.fileClient);
+        assert.equal(client.makePath(), path.resolve('../other'));
+    });
+
+    test('~/path is expanded to home directory file://', () =>
+    {
+        const os = require('os');
+        const client = fmeld.getConnection('~/photos', null, {verbose: false});
+        assert.ok(client instanceof fmeld.fileClient);
+        assert.equal(client.makePath(), path.join(os.homedir(), 'photos'));
+    });
+
+    test('bare .zip path routes to zipClient', () =>
+    {
+        const client = fmeld.getConnection('/tmp/archive.zip', null, {verbose: false});
+        assert.ok(client instanceof fmeld.zipClient);
+        assert.equal(client.makePath(), '/tmp/archive.zip');
+    });
+
+    test('relative .zip path routes to zipClient with resolved path', () =>
+    {
+        const client = fmeld.getConnection('./backup.zip', null, {verbose: false});
+        assert.ok(client instanceof fmeld.zipClient);
+        assert.equal(client.makePath(), path.resolve('./backup.zip'));
+    });
+
+    test('~/path to .zip routes to zipClient', () =>
+    {
+        const os = require('os');
+        const client = fmeld.getConnection('~/Backup/test.zip', null, {verbose: false});
+        assert.ok(client instanceof fmeld.zipClient);
+        assert.equal(client.makePath(), path.join(os.homedir(), 'Backup/test.zip'));
+    });
+
+    test('explicit file:// with .zip extension routes to zipClient', () =>
+    {
+        const client = fmeld.getConnection('file:///tmp/archive.zip', null, {verbose: false});
+        assert.ok(client instanceof fmeld.zipClient);
+        assert.equal(client.makePath(), '/tmp/archive.zip');
+    });
+
+    test('explicit zip:// is unaffected by extension routing', () =>
+    {
+        const client = fmeld.getConnection('zip:///tmp/archive.zip', null, {verbose: false});
+        assert.ok(client instanceof fmeld.zipClient);
+    });
+
+    test('file:// path without known extension stays as fileClient', () =>
+    {
+        const client = fmeld.getConnection('file:///tmp/somedir', null, {verbose: false});
+        assert.ok(client instanceof fmeld.fileClient);
+    });
+
     test('every scheme in the BACKENDS registry is handled by getConnection', () =>
     {
         // Guarantees that adding a backend to the registry without wiring it into
@@ -1852,6 +1922,40 @@ describe('zipClient', { skip: !HAS_ZIP ? 'unzipper or archiver package not insta
             if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
         }
     });
+
+    test('abort() after writes discards staging and leaves original untouched', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-abort-${Date.now()}.zip`);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        try
+        {
+            await c.connect();
+            const ws = await c.createWriteStream(archivePath + '/f.txt');
+            await writeStream(ws, 'data that should be discarded');
+            assert.equal(typeof c.abort, 'function', 'abort should be exposed on zip client');
+            await c.abort();
+            assert.equal(c.isConnected(), false);
+            // Original archive must not have been created
+            assert.equal(fs.existsSync(archivePath), false, 'archive must not exist after abort');
+            // Subsequent close() should be a no-op (already disconnected)
+            await c.close();
+            assert.equal(fs.existsSync(archivePath), false, 'archive must still not exist after close');
+        }
+        finally
+        {
+            if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+        }
+    });
+
+    test('abort() on a connected client with no writes is a no-op', async () =>
+    {
+        const archivePath = path.join(os.tmpdir(), `fmeld-zip-abort-nowrites-${Date.now()}.zip`);
+        const c = fmeld.getConnection(`zip://${archivePath}`, null, {});
+        await c.connect();
+        await c.abort();
+        assert.equal(c.isConnected(), false);
+        assert.equal(fs.existsSync(archivePath), false);
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -2894,11 +2998,19 @@ describe('validateGroup', () =>
         assert.ok(r.reason.includes('keep'));
     });
 
-    test('all-none blocks the group', () =>
+    test('all-none is invalid but flagged as skip (not a hard block)', () =>
     {
         const r = validateGroup(entry(['none', 'none']));
         assert.equal(r.valid, false);
         assert.ok(r.reason.includes('none'));
+        assert.equal(r.skip, true);
+    });
+
+    test('review is invalid without skip flag (hard block)', () =>
+    {
+        const r = validateGroup(entry(['keep', 'review']));
+        assert.equal(r.valid, false);
+        assert.equal(r.skip, undefined);
     });
 
     test('already-applied result: keep + delete still validates', () =>
@@ -3243,6 +3355,42 @@ describe('applySession', () =>
             finally { process.stderr.write = origWrite; }
             assert.equal(r.skipped, 1);
             assert.equal(r.failed,  0);
+        }
+        finally
+        {
+            await client.close();
+            fs.rmSync(root, {recursive: true, force: true});
+        }
+    });
+
+    test('all-none group is skipped automatically without --force', async () =>
+    {
+        const root   = makeTmpFiles({ 'a.txt': 'x', 'b.txt': 'x' });
+        const client = fmeld.getConnection(`file://${root}`, null, {verbose: false});
+        await client.connect();
+        const sd = {
+            entries: [{
+                group_id: 'test', result: null,
+                detection: { method: 'sha256', hash: 'abc' },
+                files: [
+                    { path: path.join(root, 'a.txt'), name: 'a.txt', size: 1, mtime: 0, action: 'none', applied: false },
+                    { path: path.join(root, 'b.txt'), name: 'b.txt', size: 1, mtime: 0, action: 'none', applied: false },
+                ]
+            }],
+            session: { state: 'review', last_applied_at: null },
+            summary: { reclaimable_bytes: 0 },
+        };
+        try
+        {
+            const origWrite = process.stderr.write.bind(process.stderr);
+            process.stderr.write = () => true;
+            let r;
+            try  { r = await Session.applySession(client, sd, { isFileBk: true, force: false }); }
+            finally { process.stderr.write = origWrite; }
+            assert.equal(r.skipped, 1);
+            assert.equal(r.applied, 0);
+            assert.ok(fs.existsSync(path.join(root, 'a.txt')), 'files should be untouched');
+            assert.ok(fs.existsSync(path.join(root, 'b.txt')), 'files should be untouched');
         }
         finally
         {
