@@ -6,8 +6,18 @@ ENV NODE_OPTIONS=--openssl-legacy-provider
 
 COPY package.json ./
 RUN npm install
-RUN npm install webdav @aws-sdk/client-s3 @aws-sdk/lib-storage @azure/storage-blob @marsaud/smb2
+RUN npm install webdav \
+        @aws-sdk/client-s3 @aws-sdk/lib-storage \
+        @azure/storage-blob \
+        @marsaud/smb2 \
+        @google-cloud/storage \
+        unzipper archiver
 
 COPY . .
+
+# Set after COPY so the cert bundle exists when Node.js loads it at runtime.
+# Setting it here (not in the npm install layers above) avoids a spurious
+# "No such file or directory" warning during the build.
+ENV NODE_EXTRA_CA_CERTS=/app/docker/live-test/certs/test-ca-bundle.crt
 
 CMD ["node", "docker/live-test/run-live.js"]

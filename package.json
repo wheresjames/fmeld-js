@@ -7,7 +7,9 @@
   },
   "scripts": {
     "smoketest": "node run-smoketests.js",
-    "smoketest:cleanup": "node run-smoketests.js --cleanup"
+    "smoketest:cleanup": "node run-smoketests.js --cleanup",
+    "smoke:live": "node run-live-cloud-smoketests.js",
+    "smoke:doctor": "node run-live-cloud-smoketests.js --doctor"
   },
   "dependencies": {
     "chrono-node": "^2.4.2",

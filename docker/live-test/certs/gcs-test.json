@@ -1,0 +1,12 @@
+{
+  "type": "service_account",
+  "project_id": "test-project",
+  "private_key_id": "test-key-id-0000000000000000000000000000000000000001",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDUk5lrlETNNe5O\nt/Rs4hTjkU8lTQulRGw4Jjt9C2BsU0E8oSiPrhIrVjye/rqHZ66TaNZCPtXH0j2y\nKQEOVvHVqOCdZvamLsQq3efWWUAqSWn1meUgRpz25LUqIoPE99BVapcc2qmtCKuX\n6Q3zOan3t6dVU99j5r/f6nc3M1cIp62uIdywqLmIqBVT0qV1enuHB5gLc6zkVto3\nK93FGq0UcTpuSTE4Y7MRK/wm6gwfK+I7uSxRHNeKSQKt9UfU5TvrloiLgtez/wNR\nWqP6/wo/LBgpXqvPC6osU8r+aG8qX9v9928rjWq5VTNrSoBBcQWw7XgO2asBoeIm\nlSB30CYfAgMBAAECggEAZEzyXla6seLo+v6EF14DQi7dW7nDLWsf7sxnVERqbiJI\nTT2zQDv/ebA6cUC6rUoIDqiwM9inER4Lm0UKqQPwHoKM3OfoqBe32owSqEo7Yth5\n5PcEq9p1lG7sZiGb7/OHus3M2EH6Plkxcb92pBVIs8fVbgbhiCcn0JS2RHb2cW+k\naInC+smnCTZkt2PMAz+eBWmfvypFkF/YiFHsBTJxZemVUNASGvxtPnud4N6UNDOR\nVfhrrTNmXkXYHBdBJsymuwXYJnR0XZu072KRYQQ/VwkgPZdDgk9eDUi3UQThauvh\njCOsQ7D7u1/VryF+ePYYuu9bN/TqckdDi+/sKNlFzQKBgQDu6hwYRRUUWwYKnm2A\nnIcaA4Xv82FR7KBWs1tXkpP+sMHjkkgtYF/6i4M9YMk/GUtLeSqjRsqDogV6Fvs8\nLylDh7+upSODiNVPbmAjN1g7Y/nQy6uHuprW5HTS1Q572GlItcfailKAa4kPptV4\nurZAZ7v/GmstX1kiXc8klCPhjQKBgQDjx0/aj7VTHss7v+aWWmE5tYvWkp8+3CqG\nWEkCryJZoOTjeZqCEMLTaHtYe08mHu00lxIJv8y4bCSI4loSrxQW007awibk2hNy\n8oBNWStLUzfQomWa+YPb/R6scjgqVYyvovXtlyHTvLc5ErXuDYtjxBc7Tv3qvgQr\nWkoXawodWwKBgC9vY+ydqrXD7Msm8W7bpSdRE8K0e9ocNSmBqt0USTYEOjrIzHPV\n8rh4ArKpCMvyZbSydfi9EXBZNuUqsu8cHgE+bpxqRUbUYCXJMGVNk8MW8n62MXRd\nZGjOKzPBAYMtUJoTHX8Sf5bnwurMoQ27ZHwdHIJl6Gm1yKi+H2aP0x/xAoGAdeGH\nnSg0gjD0oxZ8gqGBobkoBsNY8NJGm8KC/oWetF4FNwiPAvMjsP9onnEqlCL7RfVN\nG4iMrYEiI0lprjO3pNx0+dfzAwstd5ay+dTFCDWoNCxngx3QtQA5aKuwD5C4v4kJ\n140Yr5kCBeJ+DxYpZldsYoBN/reaNsmCgL4fvPMCgYAP1fDj4yJoHF+XovkVQfp2\nbUW49hBtUnj6hd61fseO5msPefFS9M++TbVJitb5XjhxnuNMaac6fBdH4YGwGklK\nXPc5G/AiSJnbFYtw1rY10KlILpj++kCQ01Hn57z7SbgqLdJAZvQkgtR602vyIzN8\nHzmAMAhcupTJFcuqwqYHxw==\n-----END PRIVATE KEY-----\n",
+  "client_email": "fmeld-smoke-test@test-project.iam.gserviceaccount.com",
+  "client_id": "123456789000000000001",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/fmeld-smoke-test@test-project.iam.gserviceaccount.com"
+}

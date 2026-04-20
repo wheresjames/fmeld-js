@@ -6,7 +6,11 @@ services:
     depends_on:
       ftp:
         condition: service_healthy
+      ftps:
+        condition: service_healthy
       webdav:
+        condition: service_healthy
+      webdavs:
         condition: service_healthy
       sftp:
         condition: service_healthy
@@ -16,13 +20,26 @@ services:
         condition: service_healthy
       azurite:
         condition: service_healthy
+      gcs:
+        condition: service_healthy
     environment:
       FMELD_LIVE_TMP: /tmp/fmeld-live
+      STORAGE_EMULATOR_HOST: http://gcs:4443
 
   ftp:
     build:
       context: ../..
       dockerfile: docker/live-test/Dockerfile.ftp
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2121"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ftps:
+    build:
+      context: ../..
+      dockerfile: docker/live-test/Dockerfile.ftps
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "2121"]
       interval: 5s
@@ -35,6 +52,16 @@ services:
       dockerfile: docker/live-test/Dockerfile.webdav
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  webdavs:
+    build:
+      context: ../..
+      dockerfile: docker/live-test/Dockerfile.webdavs
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8443"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -76,6 +103,15 @@ services:
     command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --location /data --debug /data/debug.log --skipApiVersionCheck
     healthcheck:
       test: ["CMD", "node", "-e", "require('net').createConnection(10000,'localhost').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gcs:
+    image: fsouza/fake-gcs-server:latest
+    command: ["-scheme", "http", "-port", "4443", "-public-host", "gcs"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4443/storage/v1/b"]
       interval: 5s
       timeout: 3s
       retries: 10

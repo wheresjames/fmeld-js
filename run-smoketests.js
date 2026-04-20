@@ -8,7 +8,7 @@ const { spawn } = require('child_process');
 const ROOT = __dirname;
 const REPORTS_DIR = path.join(ROOT, 'reports');
 const COMPOSE_FILE = path.join('docker', 'live-test', 'docker-compose.yml');
-const ALL_BACKENDS = ['ftp', 'webdav', 'sftp', 'smb', 's3', 'azblob'];
+const ALL_BACKENDS = ['ftp', 'ftps', 'webdav', 'webdavs', 'sftp', 'smb', 's3', 'azblob', 'gcs', 'zip'];
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -310,6 +310,24 @@ async function main() {
 
     fs.writeFileSync(reportPath, sections.join('\n'), 'utf8');
 
+    // ── report.json ────────────────────────────────────────────────────────
+
+    const jsonReport = {
+        status:    passed ? 'pass' : 'fail',
+        date:      new Date().toISOString(),
+        duration:  duration,
+        backends:  ALL_BACKENDS.map(b => ({
+            name:     b,
+            result:   results[b] || 'did-not-run',
+            duration: backendTimes[b] || null
+        })),
+        errors:    errorLines,
+        platform:  process.platform,
+        node:      process.version
+    };
+    const jsonReportPath = reportPath.replace(/\.md$/, '.json');
+    fs.writeFileSync(jsonReportPath, JSON.stringify(jsonReport, null, 2), 'utf8');
+
     // ── terminal summary ───────────────────────────────────────────────────
 
     const bar = '─'.repeat(48);
@@ -317,6 +335,7 @@ async function main() {
     console.log(`  Status:   ${statusBadge}`);
     console.log(`  Duration: ${formatDuration(duration)}`);
     console.log(`  Report:   ${reportPath}`);
+    console.log(`            ${jsonReportPath}`);
     console.log(`${bar}\n`);
 
     process.exit(exitCode);

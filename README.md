@@ -1050,7 +1050,9 @@ fmeld -s ~/music -d adb:///sdcard/Music cp -r
 
 ## Testing
 
-The test suite uses the built-in [`node:test`](https://nodejs.org/api/test.html) runner (Node 18+):
+### Unit tests
+
+The unit test suite uses the built-in [`node:test`](https://nodejs.org/api/test.html) runner (Node 18+):
 
 ```bash
 node --test test/test.js
@@ -1058,13 +1060,77 @@ node --test test/test.js
 
 Tests cover `toHuman`, `promiseWhile`/`promiseWhileBatch`, `parseParams`, `getConnection` protocol dispatch (including bare-path expansion and extension-based routing), all client constructors, `copyDir`, `syncDir`, `cleanDir`, `loadConfig`, and the `dupes` command (`normalizeFileName`, `findDuplicates`, `applyPreset`, `validateGroup`, `carryForward`, session save/load round-trips, and `applySession` including delete, hardlink, all-none auto-skip, and force-skip). The `zip://` backend is covered including writes, deletes, directory operations, orphan cleanup, and `abort()`. Filesystem tests create and clean up their own temporary directories under `os.tmpdir()`.
 
-For a Docker-based live smoke test against real protocol servers, run:
+### Docker smoke tests
+
+The smoke test suite runs `fmeld` against real protocol servers inside Docker and verifies every backend end-to-end:
 
 ```bash
-docker compose -f docker/live-test/docker-compose.yml up --build --abort-on-container-exit --exit-code-from runner
+npm run smoketest
+# or directly:
+node run-smoketests.js
 ```
 
-That stack exercises `ftp`, `sftp`, `webdav`, `smb`, `s3` (via MinIO), and `azblob` (via Azurite). Details live in `docker/live-test/README.md`.
+Backends covered:
+
+| Backend | Service |
+|---|---|
+| `ftp://` | pyftpdlib |
+| `ftps://` | pyftpdlib with TLS (explicit) |
+| `sftp://` | OpenSSH sshd |
+| `webdav://` | rclone serve webdav |
+| `webdavs://` | rclone serve webdav with TLS |
+| `smb://` | Samba |
+| `s3://` | MinIO |
+| `azblob://` | Azurite |
+| `gcs://` | fsouza/fake-gcs-server |
+| `zip://` | local filesystem (no Docker service) |
+
+Each backend is exercised through: recursive listing, seed download with byte-exact content verification (including binary files), upload round-trip, cross-backend copy, `unlink`, `rm`, sync delta (v1 → v2), and duplicate detection. The runner writes a Markdown and JSON report to `reports/` on every run.
+
+To clean up Docker containers, images, and volumes after a run:
+
+```bash
+npm run smoketest:cleanup
+```
+
+Full details are in `docker/live-test/README.md`.
+
+### Live cloud smoke tests
+
+For backends that require real vendor accounts (`gdrive://`, `dropbox://`, `onedrive://`, `box://`), a separate manifest-driven runner is provided. It is designed for beta testers to run against their own accounts.
+
+Create a manifest file (see `todo/smoketests.md` for the full schema):
+
+```yaml
+version: 1
+report_dir: ./reports
+allow_destructive: true
+
+backends:
+  gdrive:
+    enabled: true
+    cred_file: ~/.config/fmeld/gdrive.json
+    root: "fmeld-smoketests"
+    ops: [ls, cp, sync, unlink, rm]
+```
+
+Validate the manifest and environment without writing anything:
+
+```bash
+node run-live-cloud-smoketests.js --config live-tests.yml --doctor
+# or:
+npm run smoke:doctor -- --config live-tests.yml
+```
+
+Run the smoke tests:
+
+```bash
+node run-live-cloud-smoketests.js --config live-tests.yml
+# or:
+npm run smoke:live -- --config live-tests.yml
+```
+
+Each enabled backend runs through: listing, upload round-trip with binary content verification, cross-backend copy, `unlink`, `rm`, and sync delta (v1 → v2). Backends with missing credentials are skipped and reported as `Skipped (no credentials)` rather than a failure. The runner writes `reports/live-smoke-<timestamp>.md` and `reports/live-smoke-<timestamp>.json`, suitable for attaching to bug reports.
 
 &nbsp;
 

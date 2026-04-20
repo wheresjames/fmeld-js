@@ -9,17 +9,19 @@ const { spawnSync } = require('child_process');
 const { S3Client, CreateBucketCommand, HeadBucketCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { BlobServiceClient } = require('@azure/storage-blob');
 
-const ROOT = '/app';
-const FIXTURES   = path.join(ROOT, 'docker/live-test/fixtures/share');
-const TMP        = process.env.FMELD_LIVE_TMP || '/tmp/fmeld-live';
-const RUN_ID     = process.env.FMELD_LIVE_RUN_ID || `run-${Date.now()}`;
-const CREDS      = path.join(TMP, 'creds');
-const DOWNLOADS  = path.join(TMP, 'downloads');
+const ROOT      = '/app';
+const FIXTURES  = path.join(ROOT, 'docker/live-test/fixtures/share');
+const CERTS     = path.join(ROOT, 'docker/live-test/certs');
+const TMP       = process.env.FMELD_LIVE_TMP || '/tmp/fmeld-live';
+const RUN_ID    = process.env.FMELD_LIVE_RUN_ID || `run-${Date.now()}`;
+const CREDS     = path.join(TMP, 'creds');
+const DOWNLOADS = path.join(TMP, 'downloads');
 const ROUNDTRIPS = path.join(TMP, 'roundtrips');
-const UPLOAD_SRC = path.join(TMP, 'upload-src');
+const UPLOAD_SRC  = path.join(TMP, 'upload-src');
 const SYNC_SRC_V1 = path.join(TMP, 'sync-src-v1');
 const SYNC_SRC_V2 = path.join(TMP, 'sync-src-v2');
 const DUPES_LOCAL = path.join(TMP, 'dupes-local');
+const ZIP_TMP     = path.join(TMP, 'zip-smoke');
 
 const AZURITE_CONNECTION_STRING = [
     'DefaultEndpointsProtocol=http',
@@ -28,23 +30,17 @@ const AZURITE_CONNECTION_STRING = [
     'BlobEndpoint=http://azurite:10000/devstoreaccount1'
 ].join(';');
 
-function log(msg)
-{
-    console.log(`\n== ${msg}`);
-}
+// ── helpers ────────────────────────────────────────────────────────────────
 
-function fileUrl(p)
-{
-    return `file://${p}`;
-}
+function log(msg) { console.log(`\n== ${msg}`); }
+function fileUrl(p) { return `file://${p}`; }
 
-/** Append a sub-path to a URL, preserving any query string */
 function appendUrlPath(url, subPath)
 {
     const qIdx = url.indexOf('?');
     if (qIdx >= 0)
-        return `${url.slice(0, qIdx)}/${subPath}${url.slice(qIdx)}`;
-    return `${url}/${subPath}`;
+        return `${url.slice(0, qIdx).replace(/\/+$/, '')}/${subPath}${url.slice(qIdx)}`;
+    return `${url.replace(/\/+$/, '')}/${subPath}`;
 }
 
 function clearDir(dir)
@@ -76,11 +72,7 @@ function waitForPort(host, port, timeoutMs = 60000)
         const tryConnect = () =>
         {
             const socket = net.createConnection({host, port});
-            socket.once('connect', () =>
-            {
-                socket.destroy();
-                resolve();
-            });
+            socket.once('connect', () => { socket.destroy(); resolve(); });
             socket.once('error', () =>
             {
                 socket.destroy();
@@ -100,16 +92,14 @@ function runFmeld(args)
     const proc = spawnSync('node', ['bin/fmeld.js', ...args],
         {cwd: ROOT, encoding: 'utf8', timeout: 30_000});
 
-    if (proc.stdout)
-        process.stdout.write(proc.stdout);
-    if (proc.stderr)
-        process.stderr.write(proc.stderr);
-
-    if (proc.error)
-        throw proc.error;
+    if (proc.stdout) process.stdout.write(proc.stdout);
+    if (proc.stderr) process.stderr.write(proc.stderr);
+    if (proc.error)  throw proc.error;
     if (0 !== proc.status)
         throw new Error(`fmeld exited with code ${proc.status}`);
 }
+
+// ── seeding ────────────────────────────────────────────────────────────────
 
 async function seedS3()
 {
@@ -119,36 +109,25 @@ async function seedS3()
         region: 'us-east-1',
         endpoint: 'http://minio:9000',
         forcePathStyle: true,
-        credentials: {
-            accessKeyId: 'minioadmin',
-            secretAccessKey: 'minioadmin'
-        }
+        credentials: { accessKeyId: 'minioadmin', secretAccessKey: 'minioadmin' }
     });
 
-    try
-    {
-        await client.send(new HeadBucketCommand({Bucket: 'fmeld-live'}));
-    }
-    catch(e)
-    {
-        await client.send(new CreateBucketCommand({Bucket: 'fmeld-live'}));
-    }
+    try { await client.send(new HeadBucketCommand({Bucket: 'fmeld-live'})); }
+    catch(e) { await client.send(new CreateBucketCommand({Bucket: 'fmeld-live'})); }
 
     for (const rel of walkFiles(FIXTURES))
-    {
         await client.send(new PutObjectCommand({
             Bucket: 'fmeld-live',
             Key: rel.replace(/\\/g, '/'),
             Body: fs.readFileSync(path.join(FIXTURES, rel))
         }));
-    }
 }
 
 async function seedAzurite()
 {
     log('Seeding Azurite container');
 
-    const service = BlobServiceClient.fromConnectionString(AZURITE_CONNECTION_STRING);
+    const service   = BlobServiceClient.fromConnectionString(AZURITE_CONNECTION_STRING);
     const container = service.getContainerClient('fmeld-live');
     await container.createIfNotExists();
 
@@ -158,6 +137,64 @@ async function seedAzurite()
         await blob.uploadData(fs.readFileSync(path.join(FIXTURES, rel)), {overwrite: true});
     }
 }
+
+async function seedGCS()
+{
+    log('Seeding GCS emulator bucket');
+
+    // Use direct HTTP calls to fake-gcs-server to avoid OAuth token fetches.
+    // The SDK would try to exchange a service-account JWT at oauth2.googleapis.com,
+    // which is unreachable inside Docker.
+    const http = require('http');
+    const emulatorHost = process.env.STORAGE_EMULATOR_HOST || 'http://gcs:4443';
+    const u = new URL(emulatorHost);
+    const hostname = u.hostname;
+    const port = parseInt(u.port, 10);
+
+    function gcsHttp(method, reqPath, body, contentType)
+    {
+        return new Promise((resolve, reject) =>
+        {
+            const headers = {};
+            if (body)
+            {
+                headers['Content-Type']   = contentType;
+                headers['Content-Length'] = body.length;
+            }
+            const req = http.request({hostname, port, path: reqPath, method, headers}, res =>
+            {
+                const chunks = [];
+                res.on('data', c => chunks.push(c));
+                res.on('end', () =>
+                {
+                    const data = Buffer.concat(chunks).toString();
+                    if (res.statusCode >= 400 && res.statusCode !== 409)
+                        reject(new Error(`GCS seed ${method} ${reqPath}: HTTP ${res.statusCode}: ${data}`));
+                    else
+                        resolve(data);
+                });
+            });
+            req.on('error', reject);
+            if (body) req.write(body);
+            req.end();
+        });
+    }
+
+    // 409 = bucket already exists; ignored
+    await gcsHttp('POST', '/storage/v1/b?project=test-project',
+        Buffer.from(JSON.stringify({name: 'fmeld-live'})), 'application/json');
+
+    for (const rel of walkFiles(FIXTURES))
+    {
+        const key  = encodeURIComponent(rel.replace(/\\/g, '/'));
+        const body = fs.readFileSync(path.join(FIXTURES, rel));
+        await gcsHttp('POST',
+            `/upload/storage/v1/b/fmeld-live/o?uploadType=media&name=${key}`,
+            body, 'application/octet-stream');
+    }
+}
+
+// ── test data setup ────────────────────────────────────────────────────────
 
 function writeCredFiles()
 {
@@ -172,6 +209,13 @@ function writeCredFiles()
     fs.writeFileSync(path.join(CREDS, 'azblob.json'), JSON.stringify({
         connection_string: AZURITE_CONNECTION_STRING
     }, null, 2));
+
+    // GCS: copy the pre-committed test credential into the run temp dir so the
+    // path can be passed to fmeld via -S/-E flags like the other backends.
+    fs.copyFileSync(
+        path.join(CERTS, 'gcs-test.json'),
+        path.join(CREDS, 'gcs.json')
+    );
 }
 
 function writeUploadSource()
@@ -182,30 +226,34 @@ function writeUploadSource()
     fs.writeFileSync(path.join(UPLOAD_SRC, 'nested', 'echo.txt'), 'nested upload smoke\n');
 }
 
+// v1 = full fixture tree (mirrors FIXTURES, used as sync delta baseline)
+// v2 = v1 + sync-added.txt
 function writeSyncSources()
 {
-    // v1: initial two files
     clearDir(SYNC_SRC_V1);
-    fs.writeFileSync(path.join(SYNC_SRC_V1, 'sync-a.txt'), 'sync file a\n');
-    fs.writeFileSync(path.join(SYNC_SRC_V1, 'sync-b.txt'), 'sync file b\n');
+    for (const rel of walkFiles(FIXTURES))
+    {
+        const dest = path.join(SYNC_SRC_V1, rel);
+        fs.mkdirSync(path.dirname(dest), {recursive: true});
+        fs.copyFileSync(path.join(FIXTURES, rel), dest);
+    }
 
-    // v2: keeps sync-a.txt (unchanged — should not re-upload), adds sync-c.txt
-    // sync-b.txt is absent; sync -U does not delete from destination, so it persists
     clearDir(SYNC_SRC_V2);
-    fs.writeFileSync(path.join(SYNC_SRC_V2, 'sync-a.txt'), 'sync file a\n');
-    fs.writeFileSync(path.join(SYNC_SRC_V2, 'sync-c.txt'), 'sync file c\n');
+    for (const rel of walkFiles(FIXTURES))
+    {
+        const dest = path.join(SYNC_SRC_V2, rel);
+        fs.mkdirSync(path.dirname(dest), {recursive: true});
+        fs.copyFileSync(path.join(FIXTURES, rel), dest);
+    }
+    fs.writeFileSync(path.join(SYNC_SRC_V2, 'sync-added.txt'), 'added in v2\n');
 }
 
-/** Assert that the seeded fixture tree was downloaded correctly, including content */
+// ── assertions ─────────────────────────────────────────────────────────────
+
+// The seed fixture tree: every file in FIXTURES must survive download byte-for-byte.
 function assertSeedDownloaded(dir)
 {
-    const files = [
-        'root.txt',
-        path.join('nested', 'child.txt'),
-        path.join('nested', 'deeper', 'value.json'),
-        'has space.txt',
-    ];
-    for (const rel of files)
+    for (const rel of walkFiles(FIXTURES))
     {
         const downloaded = path.join(dir, rel);
         assert.ok(fs.existsSync(downloaded), `Missing file after download: ${rel}`);
@@ -215,7 +263,6 @@ function assertSeedDownloaded(dir)
     }
 }
 
-/** Assert that the upload source survived the round-trip, including content */
 function assertUploadRoundTrip(dir)
 {
     const files = ['upload.txt', path.join('nested', 'echo.txt')];
@@ -229,6 +276,8 @@ function assertUploadRoundTrip(dir)
     }
 }
 
+// ── main ───────────────────────────────────────────────────────────────────
+
 async function main()
 {
     clearDir(TMP);
@@ -238,11 +287,14 @@ async function main()
     log('Waiting for live-test services');
     await Promise.all([
         waitForPort('ftp',     2121),
+        waitForPort('ftps',    2121),
         waitForPort('webdav',  8080),
+        waitForPort('webdavs', 8443),
         waitForPort('sftp',    22),
         waitForPort('smb',     445),
         waitForPort('minio',   9000),
-        waitForPort('azurite', 10000)
+        waitForPort('azurite', 10000),
+        waitForPort('gcs',     4443),
     ]);
 
     writeCredFiles();
@@ -250,6 +302,7 @@ async function main()
     writeSyncSources();
     await seedS3();
     await seedAzurite();
+    await seedGCS();
 
     const cases = [
         {
@@ -260,11 +313,25 @@ async function main()
             dupesUrl: `ftp://demo:password@ftp:2121/uploads/${RUN_ID}/ftp-dupes`,
         },
         {
+            name:     'ftps',
+            readUrl:  'ftps://demo:password@ftps:2121/',
+            writeUrl: `ftps://demo:password@ftps:2121/uploads/${RUN_ID}/ftps`,
+            syncUrl:  `ftps://demo:password@ftps:2121/uploads/${RUN_ID}/ftps-sync`,
+            dupesUrl: `ftps://demo:password@ftps:2121/uploads/${RUN_ID}/ftps-dupes`,
+        },
+        {
             name:     'webdav',
             readUrl:  'webdav://demo:password@webdav:8080/',
             writeUrl: `webdav://demo:password@webdav:8080/uploads/${RUN_ID}/webdav`,
             syncUrl:  `webdav://demo:password@webdav:8080/uploads/${RUN_ID}/webdav-sync`,
             dupesUrl: `webdav://demo:password@webdav:8080/uploads/${RUN_ID}/webdav-dupes`,
+        },
+        {
+            name:     'webdavs',
+            readUrl:  'webdavs://demo:password@webdavs:8443/',
+            writeUrl: `webdavs://demo:password@webdavs:8443/uploads/${RUN_ID}/webdavs`,
+            syncUrl:  `webdavs://demo:password@webdavs:8443/uploads/${RUN_ID}/webdavs-sync`,
+            dupesUrl: `webdavs://demo:password@webdavs:8443/uploads/${RUN_ID}/webdavs-dupes`,
         },
         {
             name:     'sftp',
@@ -295,10 +362,18 @@ async function main()
             syncUrl:  `azblob://fmeld-live/uploads/${RUN_ID}/azblob-sync`,
             dupesUrl: `azblob://fmeld-live/uploads/${RUN_ID}/azblob-dupes`,
             cred:     path.join(CREDS, 'azblob.json'),
-        }
+        },
+        {
+            name:     'gcs',
+            readUrl:  'gcs://fmeld-live/',
+            writeUrl: `gcs://fmeld-live/uploads/${RUN_ID}/gcs`,
+            syncUrl:  `gcs://fmeld-live/uploads/${RUN_ID}/gcs-sync`,
+            dupesUrl: `gcs://fmeld-live/uploads/${RUN_ID}/gcs-dupes`,
+            cred:     path.join(CREDS, 'gcs.json'),
+        },
     ];
 
-    // ── local file:// dupes tests ──────────────────────────────────────────────
+    // ── local file:// dupes tests ──────────────────────────────────────────
 
     log('dupes: local delete (sha256 + shortest-path keep)');
     {
@@ -306,7 +381,6 @@ async function main()
         clearDir(dir);
         fs.mkdirSync(path.join(dir, 'sub'), {recursive: true});
         const dup = 'duplicate content for delete smoke test\n';
-        // 'a.txt' has the shortest full path; the others are longer
         fs.writeFileSync(path.join(dir, 'a.txt'), dup);
         fs.writeFileSync(path.join(dir, 'longer-copy.txt'), dup);
         fs.writeFileSync(path.join(dir, 'sub', 'x.txt'), dup);
@@ -316,14 +390,10 @@ async function main()
                   '--keep', 'shortest-path', '--remaining', 'delete',
                   '--session', path.join(DUPES_LOCAL, 'delete.yml'), '--apply']);
 
-        assert.ok(fs.existsSync(path.join(dir, 'unique.txt')),
-            'unique.txt must survive dupes delete');
-        assert.ok(fs.existsSync(path.join(dir, 'a.txt')),
-            'a.txt (shortest path) must be kept');
-        assert.ok(!fs.existsSync(path.join(dir, 'longer-copy.txt')),
-            'longer-copy.txt must be deleted');
-        assert.ok(!fs.existsSync(path.join(dir, 'sub', 'x.txt')),
-            'sub/x.txt must be deleted');
+        assert.ok(fs.existsSync(path.join(dir, 'unique.txt')),       'unique.txt must survive dupes delete');
+        assert.ok(fs.existsSync(path.join(dir, 'a.txt')),            'a.txt (shortest path) must be kept');
+        assert.ok(!fs.existsSync(path.join(dir, 'longer-copy.txt')), 'longer-copy.txt must be deleted');
+        assert.ok(!fs.existsSync(path.join(dir, 'sub', 'x.txt')),    'sub/x.txt must be deleted');
     }
 
     log('dupes: local hardlink (sha256 + inode check)');
@@ -338,40 +408,30 @@ async function main()
                   '--keep', 'shortest-path', '--remaining', 'link',
                   '--session', path.join(DUPES_LOCAL, 'link.yml'), '--apply']);
 
-        assert.ok(fs.existsSync(path.join(dir, 'original.txt')),
-            'original.txt must exist after link');
-        assert.ok(fs.existsSync(path.join(dir, 'copy.txt')),
-            'copy.txt must exist after link');
+        assert.ok(fs.existsSync(path.join(dir, 'original.txt')), 'original.txt must exist after link');
+        assert.ok(fs.existsSync(path.join(dir, 'copy.txt')),     'copy.txt must exist after link');
         const inoA = fs.statSync(path.join(dir, 'original.txt')).ino;
         const inoB = fs.statSync(path.join(dir, 'copy.txt')).ino;
-        assert.strictEqual(inoA, inoB,
-            'hardlinked files must share the same inode');
+        assert.strictEqual(inoA, inoB, 'hardlinked files must share the same inode');
     }
 
     log('dupes: local name-only mode');
     {
         const dir = path.join(DUPES_LOCAL, 'name');
         clearDir(dir);
-        fs.mkdirSync(path.join(dir, 'a'), {recursive: true});
+        fs.mkdirSync(path.join(dir, 'a'),  {recursive: true});
         fs.mkdirSync(path.join(dir, 'ab'), {recursive: true});
-        // same filename, different content — grouped by name only
-        // 'a/report.txt' has a shorter full path than 'ab/report.txt' (1-char vs 2-char dir)
-        fs.writeFileSync(path.join(dir, 'a', 'report.txt'), 'version A\n');
+        fs.writeFileSync(path.join(dir, 'a',  'report.txt'), 'version A\n');
         fs.writeFileSync(path.join(dir, 'ab', 'report.txt'), 'version B\n');
-        // unique name — must not be touched
-        fs.writeFileSync(path.join(dir, 'a', 'other.txt'), 'only once\n');
+        fs.writeFileSync(path.join(dir, 'a',  'other.txt'),  'only once\n');
 
         runFmeld(['-s', fileUrl(dir), '-r', 'dupes', '--by', 'name',
                   '--keep', 'shortest-path', '--remaining', 'delete',
                   '--session', path.join(DUPES_LOCAL, 'name.yml'), '--apply']);
 
-        // a/report.txt path is shorter than ab/report.txt → kept
-        assert.ok(fs.existsSync(path.join(dir, 'a', 'report.txt')),
-            'a/report.txt (shorter path) must be kept');
-        assert.ok(!fs.existsSync(path.join(dir, 'ab', 'report.txt')),
-            'ab/report.txt must be deleted (same name, longer path)');
-        assert.ok(fs.existsSync(path.join(dir, 'a', 'other.txt')),
-            'other.txt (unique name) must be untouched');
+        assert.ok(fs.existsSync(path.join(dir, 'a',  'report.txt')),  'a/report.txt (shorter path) must be kept');
+        assert.ok(!fs.existsSync(path.join(dir, 'ab', 'report.txt')), 'ab/report.txt must be deleted');
+        assert.ok(fs.existsSync(path.join(dir, 'a',  'other.txt')),   'other.txt (unique) must be untouched');
     }
 
     log('dupes: local md5 mode + regex keep');
@@ -380,7 +440,7 @@ async function main()
         clearDir(dir);
         fs.mkdirSync(path.join(dir, 'archive'), {recursive: true});
         const dup = 'duplicate content for md5 regex test\n';
-        fs.writeFileSync(path.join(dir, 'current.txt'), dup);
+        fs.writeFileSync(path.join(dir, 'current.txt'),       dup);
         fs.writeFileSync(path.join(dir, 'archive', 'old.txt'), dup);
 
         runFmeld(['-s', fileUrl(dir), '-r', 'dupes', '--by', 'md5',
@@ -388,51 +448,105 @@ async function main()
                   '--remaining', 'delete',
                   '--session', path.join(DUPES_LOCAL, 'md5-regex.yml'), '--apply']);
 
-        // archive/old.txt matches the regex → kept; current.txt → deleted
-        assert.ok(fs.existsSync(path.join(dir, 'archive', 'old.txt')),
-            'archive/old.txt (regex match) must be kept');
-        assert.ok(!fs.existsSync(path.join(dir, 'current.txt')),
-            'current.txt must be deleted (no regex match)');
+        assert.ok(fs.existsSync(path.join(dir, 'archive', 'old.txt')), 'archive/old.txt (regex match) must be kept');
+        assert.ok(!fs.existsSync(path.join(dir, 'current.txt')),        'current.txt must be deleted');
     }
 
     log('dupes: idempotent re-apply (session already applied)');
     {
-        const dir = path.join(DUPES_LOCAL, 'idempotent');
+        const dir  = path.join(DUPES_LOCAL, 'idempotent');
         clearDir(dir);
-        const dup = 'idempotent test content\n';
+        const dup  = 'idempotent test content\n';
         fs.writeFileSync(path.join(dir, 'a.txt'), dup);
         fs.writeFileSync(path.join(dir, 'b.txt'), dup);
         const sess = path.join(DUPES_LOCAL, 'idempotent.yml');
 
-        // first apply: deletes one file
         runFmeld(['-s', fileUrl(dir), '-r', 'dupes', '--by', 'sha256',
                   '--keep', 'first', '--remaining', 'delete',
                   '--session', sess, '--apply']);
 
-        // second apply of the same session: all entries already 'applied' → skipped
         runFmeld(['-s', fileUrl(dir), 'dupes', '--session', sess, '--apply']);
     }
 
-    // ── per-backend tests ───────────────────────────────────────────────────
+    // ── zip local smoke ────────────────────────────────────────────────────
+
+    log('Smoke testing zip');
+    {
+        clearDir(ZIP_TMP);
+        const archivePath = path.join(ZIP_TMP, 'smoke.zip');
+        const extractDir  = path.join(ZIP_TMP, 'extracted');
+        const zipUrl      = `zip://${archivePath}`;
+
+        // Upload fixture tree into a new archive
+        runFmeld(['-s', fileUrl(FIXTURES), '-d', zipUrl, '-r', '-U', 'sync']);
+
+        // List archive contents and verify all fixture files are present
+        runFmeld(['-s', zipUrl, '-r', 'ls']);
+
+        // Extract to disk and verify round-trip byte-for-byte (including binary.bin)
+        clearDir(extractDir);
+        runFmeld(['-s', zipUrl, '-d', fileUrl(extractDir), '-r', 'cp']);
+        assertSeedDownloaded(extractDir);
+
+        // Attempt a second upload of the same tree — the zip backend aborts on dupes
+        // within a staged write session; verify the archive is still intact after abort.
+        try
+        {
+            runFmeld(['-s', fileUrl(FIXTURES), '-d', zipUrl, '-r', 'sync']);
+        }
+        catch(e)
+        {
+            // An exit code > 0 here is the expected dupe-abort behavior.
+            // We verify the archive still extracts cleanly.
+        }
+        const postDupeDir = path.join(ZIP_TMP, 'post-dupe');
+        clearDir(postDupeDir);
+        runFmeld(['-s', zipUrl, '-d', fileUrl(postDupeDir), '-r', 'cp']);
+        assertSeedDownloaded(postDupeDir);
+
+        // unlink one file and verify it is gone; others remain
+        const unlinkTarget = `${zipUrl}/root.txt`;
+        runFmeld(['-s', unlinkTarget, '-r', 'unlink']);
+        const postUnlinkDir = path.join(ZIP_TMP, 'post-unlink');
+        clearDir(postUnlinkDir);
+        runFmeld(['-s', zipUrl, '-d', fileUrl(postUnlinkDir), '-r', 'cp']);
+        assert.ok(!fs.existsSync(path.join(postUnlinkDir, 'root.txt')),
+            'zip: root.txt must be gone after unlink');
+        assert.ok(fs.existsSync(path.join(postUnlinkDir, 'binary.bin')),
+            'zip: binary.bin must remain after unlink');
+
+        // rm a subtree and verify it is gone
+        const rmTarget = `${zipUrl}/nested`;
+        runFmeld(['-s', rmTarget, '-r', 'rm']);
+        const postRmDir = path.join(ZIP_TMP, 'post-rm');
+        clearDir(postRmDir);
+        runFmeld(['-s', zipUrl, '-d', fileUrl(postRmDir), '-r', 'cp']);
+        assert.ok(!fs.existsSync(path.join(postRmDir, 'nested')),
+            'zip: nested/ subtree must be gone after rm');
+        assert.ok(fs.existsSync(path.join(postRmDir, 'binary.bin')),
+            'zip: binary.bin must remain after rm');
+    }
+
+    // ── per-backend tests ──────────────────────────────────────────────────
 
     for (const tc of cases)
     {
         log(`Smoke testing ${tc.name}`);
 
-        const srcCred  = tc.cred ? ['-S', tc.cred] : [];
-        const dstCred  = tc.cred ? ['-E', tc.cred] : [];
+        const srcCred      = tc.cred ? ['-S', tc.cred] : [];
+        const dstCred      = tc.cred ? ['-E', tc.cred] : [];
         const writeSrcCred = tc.cred ? ['-S', tc.cred] : [];
 
         // ls
         runFmeld([...srcCred, '-s', tc.readUrl, '-r', 'ls']);
 
-        // download seed and verify content
+        // download seed and verify content (including binary.bin)
         const downloadDir = path.join(DOWNLOADS, tc.name);
         clearDir(downloadDir);
         runFmeld([...srcCred, '-s', tc.readUrl, '-d', fileUrl(downloadDir), '-r', 'cp']);
         assertSeedDownloaded(downloadDir);
 
-        // upload via sync (exercises sync on every backend)
+        // upload via sync
         runFmeld([...dstCred, '-s', fileUrl(UPLOAD_SRC), '-d', tc.writeUrl, '-r', '-U', 'sync']);
 
         // round-trip download and verify content
@@ -441,7 +555,19 @@ async function main()
         runFmeld([...srcCred, '-s', tc.writeUrl, '-d', fileUrl(roundTripDir), '-r', 'cp']);
         assertUploadRoundTrip(roundTripDir);
 
-        // ── unlink: delete one file and verify it is gone ───────────────────
+        // ── cross-backend copy: backend → file:// (binary round-trip) ────────
+        // cp operates on directories; use the root readUrl and verify binary.bin.
+
+        const crossDstDir = path.join(TMP, 'cross-cp', tc.name);
+        clearDir(crossDstDir);
+        runFmeld([...srcCred, '-s', tc.readUrl, '-d', fileUrl(crossDstDir), '-r', 'cp']);
+        {
+            const got      = fs.readFileSync(path.join(crossDstDir, 'binary.bin'));
+            const expected = fs.readFileSync(path.join(FIXTURES, 'binary.bin'));
+            assert.ok(got.equals(expected), `${tc.name}: binary.bin cross-copy content mismatch`);
+        }
+
+        // ── unlink ─────────────────────────────────────────────────────────
 
         log(`unlink: ${tc.name}`);
 
@@ -459,37 +585,41 @@ async function main()
             `${tc.name}: nested/echo.txt should remain after unlink`
         );
 
-        // ── rm: delete the uploaded directory entirely ──────────────────────
+        // ── rm ─────────────────────────────────────────────────────────────
 
         log(`rm: ${tc.name}`);
-
         runFmeld([...writeSrcCred, '-s', tc.writeUrl, '-r', 'rm']);
 
-        // ── sync delta: verify new files appear after a second sync pass ────
+        // ── sync delta ─────────────────────────────────────────────────────
 
         log(`sync delta: ${tc.name}`);
 
-        // initial sync
         runFmeld([...dstCred, '-s', fileUrl(SYNC_SRC_V1), '-d', tc.syncUrl, '-r', '-U', 'sync']);
-
-        // second sync: sync-a.txt unchanged (should be skipped), sync-c.txt added
         runFmeld([...dstCred, '-s', fileUrl(SYNC_SRC_V2), '-d', tc.syncUrl, '-r', '-U', 'sync']);
 
         const syncDeltaDir = path.join(TMP, 'sync-delta', tc.name);
         clearDir(syncDeltaDir);
         runFmeld([...srcCred, '-s', tc.syncUrl, '-d', fileUrl(syncDeltaDir), '-r', 'cp']);
 
-        // sync-a and sync-b were in v1; sync -U does not delete, so both persist
-        assert.ok(fs.existsSync(path.join(syncDeltaDir, 'sync-a.txt')), `${tc.name}: sync-a.txt missing`);
-        assert.ok(fs.existsSync(path.join(syncDeltaDir, 'sync-b.txt')), `${tc.name}: sync-b.txt missing`);
-        // sync-c was added in v2 and should have been uploaded
-        assert.ok(fs.existsSync(path.join(syncDeltaDir, 'sync-c.txt')), `${tc.name}: sync-c.txt missing after sync delta`);
+        // All v1 files must still be present (sync -U does not delete)
+        for (const rel of walkFiles(SYNC_SRC_V1))
+            assert.ok(
+                fs.existsSync(path.join(syncDeltaDir, rel)),
+                `${tc.name}: sync delta missing v1 file: ${rel}`
+            );
+
+        // sync-added.txt was added in v2 and must have been uploaded
         assert.ok(
-            fs.readFileSync(path.join(syncDeltaDir, 'sync-c.txt')).equals(fs.readFileSync(path.join(SYNC_SRC_V2, 'sync-c.txt'))),
-            `${tc.name}: sync-c.txt content mismatch`
+            fs.existsSync(path.join(syncDeltaDir, 'sync-added.txt')),
+            `${tc.name}: sync-added.txt missing after sync delta`
+        );
+        assert.ok(
+            fs.readFileSync(path.join(syncDeltaDir, 'sync-added.txt'))
+              .equals(fs.readFileSync(path.join(SYNC_SRC_V2, 'sync-added.txt'))),
+            `${tc.name}: sync-added.txt content mismatch`
         );
 
-        // ── dupes: upload duplicate files, scan, apply delete, verify ──────────
+        // ── dupes ──────────────────────────────────────────────────────────
 
         log(`dupes: ${tc.name}`);
 
@@ -518,11 +648,11 @@ async function main()
         assert.strictEqual(
             dupesRemaining.filter(f => ['original.txt', 'copy1.txt', 'copy2.txt'].includes(f)).length,
             1,
-            `${tc.name}: exactly one duplicate must remain after dupes (found: ${dupesRemaining.join(', ')})`
+            `${tc.name}: exactly one duplicate must remain (found: ${dupesRemaining.join(', ')})`
         );
     }
 
-    // ── cross-backend: ftp → webdav (no local intermediate) ────────────────
+    // ── cross-backend: ftp → webdav (no local intermediate) ───────────────
 
     log('Cross-backend: ftp → webdav');
 

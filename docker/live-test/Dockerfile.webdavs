@@ -1,0 +1,8 @@
+FROM rclone/rclone:latest
+COPY docker/live-test/fixtures/share/ /seed/
+COPY docker/live-test/certs/webdavs.crt /certs/webdavs.crt
+COPY docker/live-test/certs/webdavs.key /certs/webdavs.key
+COPY docker/live-test/webdavs-entrypoint.sh /usr/local/bin/webdavs-entrypoint.sh
+RUN chmod +x /usr/local/bin/webdavs-entrypoint.sh
+EXPOSE 8443
+ENTRYPOINT ["/usr/local/bin/webdavs-entrypoint.sh"]
