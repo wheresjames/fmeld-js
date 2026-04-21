@@ -80,6 +80,7 @@ services:
     build:
       context: ../..
       dockerfile: docker/live-test/Dockerfile.smb
+    privileged: true
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "445"]
       interval: 5s
